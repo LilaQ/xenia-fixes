@@ -1,0 +1,11 @@
+# Title 4C4107D2, media 6CD9E482, Default.xex 4C99AB5DF93A70F3.
+# Use with game-patches/4C4107D2 - The Force Unleashed 60FPS.patch.toml.
+# The game's own clock gates gameplay at 1/60 s; avoid a second vblank cap.
+[GPU]
+vsync = false
+framerate_limit = 0
+readback_resolve = "full"
+
+[General]
+apply_patches = true
+time_scalar = 1

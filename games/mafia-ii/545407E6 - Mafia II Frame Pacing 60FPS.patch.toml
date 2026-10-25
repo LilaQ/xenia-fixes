@@ -1,0 +1,18 @@
+title_name = "Mafia II"
+title_id = "545407E6"
+hash = "D0F70B7B6332890A" # Mafia2_ReleaseDLL.xex, Media ID 32DFB07A
+
+[[patch]]
+    name = "60 FPS frame wait"
+    desc = "Changes the optional engine frame wait from 1/30 to 1/60 second. Use vsync = false and framerate_limit = 60. Verify gameplay and audio speed. Does not change shared timing constants."
+    author = "Local cabinet patch"
+    is_enabled = true
+
+    # Original: lis r7,0x8802; lfs f31,-0x7534(r7) -> shared 1/30 at 0x88018ACC.
+    # Replacement: lis r7,0x8800; lfs f31,0x7740(r7) -> existing 1/60 at 0x88007740.
+    [[patch.be32]]
+        address = 0x88190E48
+        value = 0x3CE08800
+    [[patch.be32]]
+        address = 0x88190E4C
+        value = 0xC3E77740

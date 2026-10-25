@@ -1,0 +1,16 @@
+title_name = "Just Cause 2"
+title_id = "534307E7"
+hash = "12134BD1769BFB2B"
+# Media ID 57290BAA, base version 1, default.xex without a title update.
+
+[[patch]]
+    name = "60 FPS presentation interval"
+    desc = "Changes the game's interval-two selection to interval one before D3D device creation. Keep the guest vblank rate capped at 60 Hz, framerate_limit = 60 and time_scalar = 1. Check gameplay and cutscene timing. This patch does not fix loading hangs."
+    author = "Local cabinet patch"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x82895D6C # selected when presentation interval setting is 2
+        value = 0x3BC00001 # li r30,1 (original: li r30,2 / 0x3BC00002)
+        # r30 is stored at r1+0x104. Presentation parameters start at r1+0xD0,
+        # so this is their +0x34 PresentationInterval field, passed to CreateDevice.

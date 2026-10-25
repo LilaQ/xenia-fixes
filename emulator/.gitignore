@@ -1,0 +1,12 @@
+build/
+source/
+*.exe
+*.dll
+*.iso
+*.xex
+*.pe
+*.xtr
+*.rdc
+*.etl
+*.log
+.DS_Store

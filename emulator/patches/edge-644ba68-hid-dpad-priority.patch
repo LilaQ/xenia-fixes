@@ -1,0 +1,45 @@
+diff --git a/src/xenia/hid/input_system.cc b/src/xenia/hid/input_system.cc
+index 4fdcd04..0cfee4e 100644
+--- a/src/xenia/hid/input_system.cc
++++ b/src/xenia/hid/input_system.cc
+@@ -29,6 +29,10 @@ namespace hid {
+ 
+ DEFINE_bool(vibration, true, "Toggle controller vibration.", "HID");
+ 
++DEFINE_bool(dpad_overrides_left_stick, false,
++            "Suppress matching left-stick directions while the D-pad is held",
++            "HID");
++
+ DEFINE_double(left_stick_deadzone_percentage, 0.0,
+               "Defines deadzone level for left stick. Allowed range [0.0-1.0].",
+               "HID");
+@@ -192,6 +196,29 @@ X_RESULT InputSystem::GetStateForUI(uint32_t user_index, uint32_t flags,
+     if (r == X_ERROR_SUCCESS) {
+       UpdateUsedSlot(binding.driver, user_index, true);
+       AdjustDeadzoneLevels(user_index, &out_state->gamepad);
++      if (cvars::dpad_overrides_left_stick) {
++        auto& gamepad = out_state->gamepad;
++        const uint16_t buttons = gamepad.buttons;
++        bool suppressed = false;
++        if (((buttons & X_INPUT_GAMEPAD_DPAD_LEFT) && gamepad.thumb_lx < 0) ||
++            ((buttons & X_INPUT_GAMEPAD_DPAD_RIGHT) && gamepad.thumb_lx > 0)) {
++          gamepad.thumb_lx = 0;
++          suppressed = true;
++        }
++        if (((buttons & X_INPUT_GAMEPAD_DPAD_DOWN) && gamepad.thumb_ly < 0) ||
++            ((buttons & X_INPUT_GAMEPAD_DPAD_UP) && gamepad.thumb_ly > 0)) {
++          gamepad.thumb_ly = 0;
++          suppressed = true;
++        }
++        if (suppressed) {
++          static std::atomic<uint32_t> reported_slots{0};
++          const uint32_t slot_bit = 1u << user_index;
++          if (!(reported_slots.fetch_or(slot_bit) & slot_bit)) {
++            XELOGI("HID: D-pad suppressed matching left-stick input in slot {}",
++                   user_index);
++          }
++        }
++      }
+       if (out_state->gamepad.buttons != 0) {
+         last_used_slot = user_index;
+       }

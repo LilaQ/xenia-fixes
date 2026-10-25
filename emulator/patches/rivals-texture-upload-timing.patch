@@ -1,0 +1,120 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -66,6 +66,9 @@
+             "Log asynchronous hardware GPU submission times every 120 frames.",
+             "D3D12");
+ 
++DEFINE_bool(d3d12_texture_load_timing, false,
++            "Attribute sampled texture upload GPU time to exact guest textures.",
++            "D3D12");
+ DEFINE_bool(d3d12_stage_small_readback, false,
+             "Snapshot recently CPU-read page-aligned resolves up to 64 KB into a "
+             "bounded "
+@@ -4590,6 +4593,22 @@
+   return index;
+ }
+ 
++uint32_t D3D12CommandProcessor::BeginTextureLoadTiming(
++    uint32_t base, uint32_t mips, uint32_t width, uint32_t height,
++    uint32_t format) {
++  if (!cvars::d3d12_texture_load_timing || !IsGpuStageTimingSample())
++    return UINT32_MAX;
++  uint32_t index = BeginStageTiming(GpuTimingStage::kTextureUpload);
++  if (index != UINT32_MAX) {
++    auto& timing = draw_timings_[index];
++    timing.vertex_shader = base;
++    timing.pixel_shader = mips;
++    timing.surface = width | (height << 16);
++    timing.mode = format;
++  }
++  return index;
++}
++
+ void D3D12CommandProcessor::EndDrawTiming(uint32_t index) {
+   if (index != UINT32_MAX) {
+     DrawTiming& timing = draw_timings_[index];
+@@ -4625,6 +4644,7 @@
+   using Key = std::tuple<uint64_t, uint64_t, uint32_t, uint32_t, bool>;
+   using Value = std::pair<double, uint32_t>;
+   std::map<Key, Value> sums;
++  std::map<Key, Value> texture_sums;
+   std::map<std::pair<GpuTimingStage, bool>, Value> stage_sums;
+   std::map<Key, D3D12_QUERY_DATA_PIPELINE_STATISTICS> statistics;
+   D3D12_QUERY_DATA_PIPELINE_STATISTICS total_statistics = {};
+@@ -4641,6 +4661,13 @@
+     const DrawTiming& draw = draw_timings_[i];
+     const double ms = double(ticks[i * 2 + 1] - ticks[i * 2]) *
+                       1000.0 / double(submission_timing_frequency_);
++    if (draw.stage == GpuTimingStage::kTextureUpload) {
++      auto& sum = texture_sums[{draw.vertex_shader, draw.pixel_shader,
++                               draw.surface, draw.mode, false}];
++      sum.first += ms;
++      ++sum.second;
++      continue;
++    }
+     if (draw.stage != GpuTimingStage::kDraw) {
+       auto& sum = stage_sums[{draw.stage, draw.stage_had_commands}];
+       sum.first += ms;
+@@ -4702,6 +4729,16 @@
+              count.VSInvocations, count.GSInvocations, count.CInvocations,
+              count.PSInvocations);
+     }
++  }
++  std::vector<std::pair<Key, Value>> texture_sorted(texture_sums.begin(),
++                                                    texture_sums.end());
++  std::sort(texture_sorted.begin(), texture_sorted.end(),
++            [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
++  for (size_t i = 0; i < std::min(texture_sorted.size(), size_t(16)); ++i) {
++    const auto& [key, value] = texture_sorted[i];
++    XELOGI("GPU texture timing: base {:08X}, mips {:08X}, {}x{}, format {}: {:.3f} ms in {} uploads",
++           std::get<0>(key), std::get<1>(key), std::get<2>(key) & 65535,
++           std::get<2>(key) >> 16, std::get<3>(key), value.first, value.second);
+   }
+   for (const auto& [stage, value] : stage_sums) {
+     const char* name = "unknown";
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -123,6 +123,9 @@
+   void InsertDebugMarker(const char* format, ...);
+   bool debug_markers_enabled() const { return debug_markers_enabled_; }
+   bool IsGpuStageTimingSample() const;
++  uint32_t BeginTextureLoadTiming(uint32_t base, uint32_t mips,
++                                  uint32_t width, uint32_t height,
++                                  uint32_t format);
+   uint32_t BeginTransferTiming(bool stencil, bool color);
+   void EndTransferTiming(uint32_t index) { EndDrawTiming(index); }
+ 
+@@ -427,6 +430,7 @@
+     kTransferDepth,
+     kTransferStencil,
+     kTransferColor,
++    kTextureUpload,
+   };
+   struct DrawTiming {
+     uint64_t vertex_shader;
+@@ -456,7 +460,7 @@
+   uint64_t draw_timing_pending_submission_ = 0;
+   uint32_t draw_timing_resolved_ = 0;
+   bool draw_timing_unavailable_ = false;
+-  std::array<uint32_t, 8> empty_stage_counts_{};
++  std::array<uint32_t, 9> empty_stage_counts_{};
+ 
+   static constexpr uint32_t kSubmissionTimingSlots = 256;
+   struct SubmissionTiming {
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -1602,6 +1602,14 @@
+   SCOPE_profile_cpu_f("gpu");
+   D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
+   TextureKey texture_key = d3d12_texture.key();
++  struct TextureTimingScope {
++    D3D12CommandProcessor& processor;
++    uint32_t index;
++    ~TextureTimingScope() { processor.EndTransferTiming(index); }
++  } timing_scope{command_processor_, command_processor_.BeginTextureLoadTiming(
++      texture_key.base_page << 12, texture_key.mip_page << 12,
++      texture_key.GetWidth(), texture_key.GetHeight(), uint32_t(texture_key.format))};
++
+   uint32_t mip_upload_mask = UINT32_MAX;
+   std::array<uint32_t, xenos::kTextureMaxMips> mip_slice_masks;
+   mip_slice_masks.fill(UINT32_MAX);

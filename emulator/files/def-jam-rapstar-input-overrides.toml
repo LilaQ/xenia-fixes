@@ -1,0 +1,4 @@
+# Def Jam Rapstar (4B4E0820) treats simultaneous D-pad and left-stick menu
+# movement as two steps. Apply only to its per-game Mic config.
+[HID]
+dpad_overrides_left_stick = true

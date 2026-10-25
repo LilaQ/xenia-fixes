@@ -1,0 +1,52 @@
+title_name = "Army of Two: The Devil's Cartel"
+title_id = "454109AB"
+hash = "9AFBA736404E53F5" # AO4.Main.xex, RF disc, Media ID 60F8EF51
+
+[[patch]]
+name = "60 Hz clocks and frame pacing"
+desc = "60 Hz clocks with elapsed-time tick counting and a 60 FPS host limit. Requires runtime verification of frame rate, game speed and campaign progression. Keep Readback enabled and the host limit at 60."
+author = "Local cabinet patch"
+is_enabled = true
+
+# All three callers of 82EED050 supply 30 as r5. The constructor derives
+# reciprocal time steps and its four-times-finer substep from that rate.
+# Original at each site: 38A0001E (li r5,30).
+[[patch.be32]]
+address = 0x82CD66F8
+value = 0x38A0003C
+[[patch.be32]]
+address = 0x82CD704C
+value = 0x38A0003C
+[[patch.be32]]
+address = 0x82CD7080
+value = 0x38A0003C
+
+# The VSync-enabled path selects clock mode 2, which substitutes measured
+# display-period values initialized to 30 Hz. Select mode 3 instead:
+# 82EED634 reads elapsed time; 82EED69C calls 82EE7578 to derive the tick
+# count from elapsed time * the configured rate. Unlike mode 1's unconditional
+# one-tick-per-render path at 82EED6C8, this can catch up after a slow frame.
+# Keep the existing fixed single-player substep; do not scale game speed.
+# Original: 38800002 (li r4,2), passed to 82EE73D8.
+[[patch.be32]]
+address = 0x82CD69A8
+value = 0x38800003
+
+# Read 60.0f from the existing constant at 82A03C38 in both MaxSimFps
+# consumers, independent of serialized settings overriding the constructor.
+# r11 is 82A00000 at the first site; r10 is 82A00000 at the second.
+# Originals: C01D0020 (lfs f0,0x20(r29)), C00B0020 (lfs f0,0x20(r11)).
+[[patch.be32]]
+address = 0x82EED250
+value = 0xC00B3C38
+[[patch.be32]]
+address = 0x82EE74FC
+value = 0xC00A3C38
+
+# ForceSinglePlayerFixedTick also truncates the already calculated elapsed-time
+# tick count to one at 82EED788..794. Preserve the fixed 1/60 step assigned
+# at 82EED660..674, but allow multiple steps after a slower rendered frame.
+# Original at 82EED784: 419A0014 (beq cr6,82EED798).
+[[patch.be32]]
+address = 0x82EED784
+value = 0x48000014

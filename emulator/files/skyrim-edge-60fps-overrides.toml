@@ -1,0 +1,36 @@
+# Skyrim 425307E6, media 34F5B6C3, base hash 4EA242EA99AD16F0.
+# Use with the matching upstream Skyrim 60 FPS patch enabled in Edge/patches.
+# Preserve the game's existing Profiles section and shared Canary content.
+
+[Display]
+fullscreen = true
+
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+gpu_allow_invalid_upload_range = true
+readback_resolve = true
+occlusion_query = "fast"
+guest_display_refresh_cap = false
+framerate_limit = 60
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[HID]
+hid = "sdl"
+
+[Kernel]
+# Compare native host threads after Edge's cooperative scheduler reported
+# all guest CPUs idle and the main/worker threads blocked during the intro.
+guest_scheduler = false
+
+[Storage]
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+
+[UI]
+show_achievement_notification = true

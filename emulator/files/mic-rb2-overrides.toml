@@ -1,0 +1,6 @@
+# Apply to the per-game Mic config for Rock Band 2 (PAL, LaunchBox ID
+# fb35c29c). Keep the title's previously tested kernel version while enabling
+# host microphone capture in that separate config.
+[Kernel]
+kernel_build_version = 1888
+allow_mic_initialization = true

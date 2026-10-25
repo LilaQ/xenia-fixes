@@ -1,0 +1,18 @@
+title_name = "The Lord of the Rings: The Battle for Middle-earth II"
+title_id = "454107DF"
+hash = "64CA08FEDC8903CB"
+# Installed PAL base executable, media 2BF7C928.
+
+[[patch]]
+name = "60 FPS client frame limiter (test)"
+desc = "Use 60 for the client-loop frame-wait calculation instead of the configured FPS limit. Leaves the separate logic-loop wait and timestep constants unchanged. Gameplay smoothness and normal simulation speed require verification. Use a 60 FPS host limit."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x8219E628
+value = 0x3960003C # li r11,60; originally 0xE96E000E / lwa r11,0xC(r14)
+# Original value is converted to float and used as the denominator at
+# 8219E640..8219E65C before the client-loop wait at 8219E684..8219E69C.
+# The distinct UseFPSLimit logic wait (823F8370..823F8398, 29ms threshold)
+# is deliberately unchanged. No global 30Hz simulation constants are patched.

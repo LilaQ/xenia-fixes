@@ -1,0 +1,14 @@
+title_name = "Hitman: Contracts HD"
+title_id = "5351081C"
+hash = "B9FAF12B253E03B3"
+# HD Trilogy disc 1, HMC/default.xex, Media ID 63956038, base version 2.
+
+[[patch]]
+    name = "60 FPS presentation interval"
+    desc = "Sets the game's D3D presentation interval from two vblanks to one. Keep the guest refresh rate at 60 Hz and time_scalar at 1. Requires enough CPU/GPU performance; verify gameplay, camera and cutscene timing."
+    author = "Local cabinet patch"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x82658AA0 # li r9,2; stored at D3DPRESENT_PARAMETERS + 0x34
+        value = 0x39200001 # li r9,1 (original: 0x39200002)

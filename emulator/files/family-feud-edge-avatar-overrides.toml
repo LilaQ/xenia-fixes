@@ -1,0 +1,37 @@
+# Edge 644ba68 with edge-644ba68-familyfeud-avatar.patch.
+# Imported from the related chat's experimental AvatarEditorRecomp port.
+# The avatar rendering was not yet correct in that chat; this is a test build.
+# Keep private profile-slot values from the existing Family Feud config.
+
+[APU]
+apu = "any"
+xma_decoder = "new"
+use_dedicated_xma_thread = false
+
+[Display]
+fullscreen = true
+
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+occlusion_query = "fast"
+framerate_limit = 60
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[HID]
+hid = "sdl"
+
+[Kernel]
+allow_avatar_initialization = true
+avatar_asset_pack_path = ""
+avatar_default_metadata_path = ""
+
+[Storage]
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+cache_root = "D:/LaunchBox/Emulators/Xenia Edge/cache"
+
+[UI]
+show_achievement_notification = true

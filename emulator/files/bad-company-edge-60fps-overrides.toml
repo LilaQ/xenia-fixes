@@ -1,0 +1,32 @@
+# Battlefield: Bad Company, title 454107F9, media 415FF1CC.
+# Existing standard Edge executable; preserve original profile and Canary content.
+# Enable the existing illusion 60 FPS patch for module A36EB01EF1B08C86.
+[GPU]
+gpu = "d3d12"
+render_target_path = "accuracy"
+readback_resolve = true
+framerate_limit = 60
+guest_display_refresh_cap = true
+occlusion_query = "fast"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[APU]
+use_dedicated_xma_thread = false
+xma_decoder = "new"
+
+[Memory]
+protect_zero = false
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[UI]
+show_achievement_notification = true

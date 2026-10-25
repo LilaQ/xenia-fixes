@@ -1,0 +1,202 @@
+diff --git a/src/xenia/kernel/kernel_state.cc b/src/xenia/kernel/kernel_state.cc
+index 846247d..0589541 100644
+--- a/src/xenia/kernel/kernel_state.cc
++++ b/src/xenia/kernel/kernel_state.cc
+@@ -9,6 +9,7 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <cstring>
+ #include <ranges>
+ 
+ #include "xenia/kernel/kernel_state.h"
+@@ -223,6 +224,28 @@ uint32_t KernelState::title_id() const {
+ 
+ bool KernelState::is_title_open() const { return emulator_->is_title_open(); }
+ 
++bool KernelState::SetTitleKey(uint32_t slot, const uint8_t* key) {
++  if (slot >= kTitleKeyCount || !key) {
++    return false;
++  }
++  std::lock_guard<std::mutex> lock(title_keys_mutex_);
++  std::memcpy(title_keys_[slot].data(), key, kTitleKeySize);
++  title_key_valid_[slot] = true;
++  return true;
++}
++
++bool KernelState::GetTitleKey(uint32_t slot, uint8_t* key) {
++  if (slot >= kTitleKeyCount || !key) {
++    return false;
++  }
++  std::lock_guard<std::mutex> lock(title_keys_mutex_);
++  if (!title_key_valid_[slot]) {
++    return false;
++  }
++  std::memcpy(key, title_keys_[slot].data(), kTitleKeySize);
++  return true;
++}
++
+ const std::unique_ptr<xam::SpaInfo> KernelState::title_xdbf() const {
+   return module_xdbf(executable_module_);
+ }
+@@ -545,6 +568,13 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
+   if (module.get() == executable_module_.get()) {
+     return;
+   }
++  {
++    std::lock_guard<std::mutex> lock(title_keys_mutex_);
++    for (auto& key : title_keys_) {
++      key.fill(0);
++    }
++    title_key_valid_.fill(false);
++  }
+   executable_module_ = std::move(module);
+   if (!executable_module_) {
+     return;
+diff --git a/src/xenia/kernel/kernel_state.h b/src/xenia/kernel/kernel_state.h
+index 5a7bb78..bdbf695 100644
+--- a/src/xenia/kernel/kernel_state.h
++++ b/src/xenia/kernel/kernel_state.h
+@@ -11,6 +11,7 @@
+ #define XENIA_KERNEL_KERNEL_STATE_H_
+ 
+ #include <atomic>
++#include <array>
+ #include <bitset>
+ #include <condition_variable>
+ #include <deque>
+@@ -184,6 +185,10 @@ class KernelState {
+ 
+   uint32_t title_id() const;
+   bool is_title_open() const;
++  static constexpr uint32_t kTitleKeyCount = 8;
++  static constexpr uint32_t kTitleKeySize = 16;
++  bool SetTitleKey(uint32_t slot, const uint8_t* key);
++  bool GetTitleKey(uint32_t slot, uint8_t* key);
+   const std::unique_ptr<xam::SpaInfo> title_xdbf() const;
+   const std::unique_ptr<xam::SpaInfo> module_xdbf(
+       object_ref<UserModule> exec_module) const;
+@@ -424,6 +429,12 @@ class KernelState {
+ 
+   KernelVersion kernel_version_;
+ 
++  // XeKeys title slots belong to this kernel instance and must not survive a
++  // title relaunch. Guest calls may access them from different host threads.
++  std::mutex title_keys_mutex_;
++  std::array<std::array<uint8_t, kTitleKeySize>, kTitleKeyCount> title_keys_{};
++  std::array<bool, kTitleKeyCount> title_key_valid_{};
++
+   xe::global_critical_region global_critical_region_;
+ 
+   // Must be guarded by the global critical region.
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
+index 9e31f04..af271cb 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
+@@ -8,6 +8,8 @@
+ */
+ 
+ #include <algorithm>
++#include <array>
++#include <cstring>
+ #include <tuple>
+ 
+ #include "xenia/base/logging.h"
+@@ -260,6 +262,31 @@ static const uint8_t xe_key_obfuscation_key[16] = {
+     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ 
++// Harmonix's four retail MOGG keys are stored in several games in the same
++// obscured form. The existing Rock Band 3 software-AES patch on the cabinet
++// supplies the corresponding clear keys. Match the key bytes rather than a
++// game's address so other titles using this table take the same path.
++static constexpr uint8_t kHarmonixObscuredKeys[4][16] = {
++    {0x6D, 0x85, 0xA8, 0x99, 0x8B, 0x2D, 0x1C, 0x76, 0xFA, 0xDE, 0x68,
++     0xF2, 0xAF, 0x38, 0x02, 0xED},
++    {0xB2, 0x3E, 0x8D, 0xAC, 0x46, 0x49, 0x97, 0xDE, 0x21, 0xDB, 0x31,
++     0xC4, 0x33, 0x1B, 0x75, 0x6A},
++    {0xBB, 0x7C, 0x64, 0xB6, 0x4A, 0x6E, 0x19, 0xE9, 0xCC, 0x30, 0xBD,
++     0x5D, 0x0B, 0x20, 0x80, 0xB4},
++    {0x1F, 0x55, 0x21, 0x65, 0x97, 0x2F, 0xE5, 0xAF, 0x27, 0xD2, 0xD4,
++     0xF4, 0x5E, 0x93, 0xD1, 0x9D},
++};
++static constexpr uint8_t kHarmonixClearKeys[4][16] = {
++    {0x01, 0x22, 0x00, 0x38, 0xD2, 0x01, 0x78, 0x8B, 0xDD, 0xCD, 0xD0,
++     0xF0, 0xFE, 0x3E, 0x24, 0x7F},
++    {0x51, 0x73, 0xAD, 0xE5, 0xB3, 0x99, 0xB8, 0x61, 0x58, 0x1A, 0xF9,
++     0xB8, 0x1E, 0xA7, 0xBE, 0xBF},
++    {0xC6, 0x22, 0x94, 0x30, 0xD8, 0x3C, 0x84, 0x14, 0x08, 0x73, 0x7C,
++     0xF2, 0x23, 0xF6, 0xEB, 0x5A},
++    {0x02, 0x1A, 0x83, 0xF3, 0x97, 0xE9, 0xD4, 0xB8, 0x06, 0x74, 0x14,
++     0x6B, 0x30, 0x4C, 0x00, 0x91},
++};
++
+ #pragma pack(push, 1)
+ struct XE_CONSOLE_ID {
+   union {
+@@ -612,6 +639,65 @@ dword_result_t XeKeysGetKey_entry(word_t key, lpvoid_t key_buffer,
+ }
+ DECLARE_XBOXKRNL_EXPORT1(XeKeysGetKey, kNone, kSketchy);
+ 
++dword_result_t XeKeysSetKey_entry(dword_t key_num, lpvoid_t key_buffer,
++                                  dword_t key_size) {
++  if (key_num < 0xE0 || key_num >= 0xE0 + KernelState::kTitleKeyCount ||
++      !key_buffer || key_size != KernelState::kTitleKeySize) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++
++  std::array<uint8_t, KernelState::kTitleKeySize> clear_key;
++  const uint8_t* obscured_key = key_buffer.as<uint8_t*>();
++  bool harmonix_key = false;
++  for (size_t i = 0; i < std::size(kHarmonixObscuredKeys); ++i) {
++    if (std::memcmp(obscured_key, kHarmonixObscuredKeys[i],
++                    clear_key.size()) == 0) {
++      std::memcpy(clear_key.data(), kHarmonixClearKeys[i], clear_key.size());
++      harmonix_key = true;
++      break;
++    }
++  }
++  if (!harmonix_key) {
++    XECRYPT_AES_STATE obfuscation_state;
++    XeCryptAesKey(&obfuscation_state, xe_key_obfuscation_key);
++    XeCryptAesEcb(&obfuscation_state, obscured_key, clear_key.data(), false);
++  }
++
++  uint32_t slot = key_num - 0xE0;
++  KernelState::shared()->SetTitleKey(slot, clear_key.data());
++  XELOGI("XeKeysSetKey: title slot {} installed ({})", slot,
++         harmonix_key ? "Harmonix MOGG" : "console obfuscation key");
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(XeKeysSetKey, kNone, kImplemented);
++
++dword_result_t XeKeysAesCbc_entry(dword_t key_num, lpvoid_t input,
++                                  dword_t input_size, lpvoid_t output,
++                                  lpvoid_t feed, dword_t encrypt) {
++  if (key_num < 0xE0 || key_num >= 0xE0 + KernelState::kTitleKeyCount ||
++      (input_size && (!input || !output)) || (input_size & 15)) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++
++  std::array<uint8_t, KernelState::kTitleKeySize> key;
++  if (!KernelState::shared()->GetTitleKey(key_num - 0xE0, key.data())) {
++    XELOGW("XeKeysAesCbc: title key {:X} has not been installed",
++           static_cast<uint32_t>(key_num));
++    return X_STATUS_UNSUCCESSFUL;
++  }
++
++  if (input_size) {
++    XECRYPT_AES_STATE state;
++    XeCryptAesKey(&state, key.data());
++    uint8_t zero_feed[16] = {};
++    XeCryptAesCbc(&state, input.as<uint8_t*>(), input_size,
++                  output.as<uint8_t*>(), feed ? feed.as<uint8_t*>() : zero_feed,
++                  encrypt != 0);
++  }
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(XeKeysAesCbc, kNone, kImplemented);
++
+ bool XeKeysHmacSha(uint32_t key_num, const uint8_t* inp_1, uint32_t inp_1_size,
+                    const uint8_t* inp_2, uint32_t inp_2_size,
+                    const uint8_t* inp_3, uint32_t inp_3_size, uint8_t* out,

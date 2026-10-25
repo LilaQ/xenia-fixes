@@ -1,0 +1,28 @@
+title_name = "Need for Speed: Shift"
+title_id = "454108B4"
+hash = "8F8CCB15050567C3"
+# default.xex, PAL media 60DAC9C5. Hash matches the installed executable.
+
+[[patch]]
+name = "60 FPS presentation interval"
+desc = "Use one vblank instead of two at renderer initialization and in its per-frame VSync update. Preserve the original physics and elapsed-time clocks. Use a 60 FPS host limit and time_scalar=1. Actual performance and normal gameplay speed require gameplay verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+# CreateDevice receives the parameters at renderer+0x268; +0x34 is
+# PresentationInterval. The original li r9,2 is stored at renderer+0x29C.
+[[patch.be32]]
+address = 0x8264CC08
+value = 0x39200001 # original: 0x39200002
+
+# The renderer checks the current interval before updating it. Match the
+# requested one-vblank interval so that it does not reapply the old value.
+[[patch.be32]]
+address = 0x8264A1AC
+value = 0x39600001 # original: 0x39600002
+
+# SetRenderState_PresentInterval at 823A2948 writes device+0x351C.
+# Keep the separate immediate/VSync-disabled path unchanged.
+[[patch.be32]]
+address = 0x8264A1C8
+value = 0x38800001 # original: 0x38800002

@@ -1,0 +1,24 @@
+title_name = "Battlefield: Bad Company 2"
+title_id = "454108A8"
+hash = "C1F8A2BE5BCF6B96" # PAL Game.xex, loaded-module hash from Edge
+
+[[patch]]
+name = "60 Hz game clocks (native FPS unlock companion)"
+is_enabled = false
+# XEX decompression output is already memory-mapped; do not remap PE sections.
+# Constructor 82D31B98 stores r4 as the tick rate and derives reciprocal steps.
+# Original words at all three sites: 3880001E (li r4,30).
+# Keep native Game.MaxFps 60 and host limit 60; do not change time_scalar.
+# Campaign trigger behavior and game speed require runtime verification.
+
+[[patch.be32]]
+address = 0x82C41B74
+value = 0x3880003C
+
+[[patch.be32]]
+address = 0x82C66B00
+value = 0x3880003C
+
+[[patch.be32]]
+address = 0x82C66B2C
+value = 0x3880003C

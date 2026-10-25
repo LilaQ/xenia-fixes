@@ -1,0 +1,24 @@
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -1716,8 +1716,19 @@
+   // memory, so they are unaffected.
+   if (!texture_resolution_scaled) {
+     if (load_base) {
+-      command_processor_.EnsureMemexportRangeInDeviceBuffer(
+-          texture_key.base_page << 12, d3d12_texture.GetGuestBaseSize());
++      uint32_t source_base = texture_key.base_page << 12;
++      uint32_t source_size = d3d12_texture.GetGuestBaseSize();
++      if (row_count != UINT32_MAX) {
++        // Partial atlas loads read only complete linear rows or 32-block
++        // tiled bands. Do not copy unrelated host-exported pages again for
++        // every separate dirty band.
++        const uint32_t block_height = texture_key.tiled ? 4u : 1u;
++        const uint32_t row_pitch = d3d12_texture.guest_layout().base.row_pitch_bytes;
++        source_base += base_first_row / block_height * row_pitch;
++        source_size = row_count / block_height * row_pitch;
++      }
++      command_processor_.EnsureMemexportRangeInDeviceBuffer(source_base,
++                                                           source_size);
+     }
+     if (load_mips) {
+       command_processor_.EnsureMemexportRangeInDeviceBuffer(

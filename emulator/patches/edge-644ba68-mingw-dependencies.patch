@@ -1,0 +1,188 @@
+--- a/third_party/DirectX-Headers/include/directx/d3d12.h
++++ b/third_party/DirectX-Headers/include/directx/d3d12.h
+@@ -4885,6 +4885,13 @@
+ #else
+         virtual D3D12_HEAP_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_HEAP_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_HEAP_DESC GetDesc() {
++            D3D12_HEAP_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -5042,6 +5049,13 @@
+ #else
+         virtual D3D12_RESOURCE_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_RESOURCE_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_RESOURCE_DESC GetDesc() {
++            D3D12_RESOURCE_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+         virtual D3D12_GPU_VIRTUAL_ADDRESS STDMETHODCALLTYPE GetGPUVirtualAddress( void) = 0;
+@@ -5983,6 +5997,13 @@
+ #else
+         virtual D3D12_DESCRIPTOR_HEAP_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_DESCRIPTOR_HEAP_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_DESCRIPTOR_HEAP_DESC GetDesc() {
++            D3D12_DESCRIPTOR_HEAP_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+ #if defined(_MSC_VER) || !defined(_WIN32)
+@@ -5990,6 +6011,13 @@
+ #else
+         virtual D3D12_CPU_DESCRIPTOR_HANDLE *STDMETHODCALLTYPE GetCPUDescriptorHandleForHeapStart( 
+             D3D12_CPU_DESCRIPTOR_HANDLE * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_CPU_DESCRIPTOR_HANDLE GetCPUDescriptorHandleForHeapStart() {
++            D3D12_CPU_DESCRIPTOR_HANDLE result;
++            GetCPUDescriptorHandleForHeapStart(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+ #if defined(_MSC_VER) || !defined(_WIN32)
+@@ -5997,6 +6025,13 @@
+ #else
+         virtual D3D12_GPU_DESCRIPTOR_HANDLE *STDMETHODCALLTYPE GetGPUDescriptorHandleForHeapStart( 
+             D3D12_GPU_DESCRIPTOR_HANDLE * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_GPU_DESCRIPTOR_HANDLE GetGPUDescriptorHandleForHeapStart() {
++            D3D12_GPU_DESCRIPTOR_HANDLE result;
++            GetGPUDescriptorHandleForHeapStart(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -8971,6 +9006,13 @@
+ #else
+         virtual D3D12_COMMAND_QUEUE_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_COMMAND_QUEUE_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_COMMAND_QUEUE_DESC GetDesc() {
++            D3D12_COMMAND_QUEUE_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -12763,6 +12805,13 @@
+ #else
+         virtual D3D12_PROTECTED_RESOURCE_SESSION_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_PROTECTED_RESOURCE_SESSION_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_PROTECTED_RESOURCE_SESSION_DESC GetDesc() {
++            D3D12_PROTECTED_RESOURCE_SESSION_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -18357,6 +18406,13 @@
+ #else
+         virtual D3D12_PROTECTED_RESOURCE_SESSION_DESC1 *STDMETHODCALLTYPE GetDesc1( 
+             D3D12_PROTECTED_RESOURCE_SESSION_DESC1 * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_PROTECTED_RESOURCE_SESSION_DESC1 GetDesc1() {
++            D3D12_PROTECTED_RESOURCE_SESSION_DESC1 result;
++            GetDesc1(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -20545,6 +20601,13 @@
+ #else
+         virtual D3D12_RESOURCE_DESC1 *STDMETHODCALLTYPE GetDesc1( 
+             D3D12_RESOURCE_DESC1 * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_RESOURCE_DESC1 GetDesc1() {
++            D3D12_RESOURCE_DESC1 result;
++            GetDesc1(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -23098,6 +23161,13 @@
+ #else
+         virtual D3D12_SHADER_CACHE_SESSION_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_SHADER_CACHE_SESSION_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_SHADER_CACHE_SESSION_DESC GetDesc() {
++            D3D12_SHADER_CACHE_SESSION_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -30940,6 +31010,13 @@
+ #else
+         virtual D3D12_DEVICE_CONFIGURATION_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_DEVICE_CONFIGURATION_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_DEVICE_CONFIGURATION_DESC GetDesc() {
++            D3D12_DEVICE_CONFIGURATION_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+         virtual HRESULT STDMETHODCALLTYPE GetEnabledExperimentalFeatures( 
+--- a/third_party/SDL3/cmake/sdlcommands.cmake
++++ b/third_party/SDL3/cmake/sdlcommands.cmake
+@@ -20,13 +20,13 @@
+ function(sdl_glob_sources)
+   cmake_parse_arguments(ARGS "" "" "SHARED;STATIC" ${ARGN})
+   if(ARGS_SHARED)
+-    file(GLOB shared_sources CONFIGURE_DEPENDS ${ARGS_SHARED})
++    file(GLOB shared_sources ${ARGS_SHARED})
+   endif()
+   if(ARGS_STATIC)
+-    file(GLOB static_sources CONFIGURE_DEPENDS ${ARGS_STATIC})
++    file(GLOB static_sources ${ARGS_STATIC})
+   endif()
+   if(ARGS_UNPARSED_ARGUMENTS)
+-    file(GLOB both_sources CONFIGURE_DEPENDS ${ARGS_UNPARSED_ARGUMENTS})
++    file(GLOB both_sources ${ARGS_UNPARSED_ARGUMENTS})
+   endif()
+   if(TARGET SDL3-shared)
+     target_sources(SDL3-shared PRIVATE ${shared_sources} ${both_sources})
+--- a/third_party/xbyak/xbyak/xbyak_util.h
++++ b/third_party/xbyak/xbyak/xbyak_util.h
+@@ -421,7 +421,9 @@
+ 	static inline void getCpuidEx(uint32_t eaxIn, uint32_t ecxIn, uint32_t data[4])
+ 	{
+ #ifdef XBYAK_INTEL_CPU_SPECIFIC
+-	#ifdef _WIN32
++	#if defined(__MINGW32__)
++		__asm__ __volatile__("cpuid" : "=a"(data[0]), "=b"(data[1]), "=c"(data[2]), "=d"(data[3]) : "0"(eaxIn), "2"(ecxIn));
++	#elif defined(_WIN32)
+ 		__cpuidex(reinterpret_cast<int*>(data), eaxIn, ecxIn);
+ 	#else
+ 		__cpuid_count(eaxIn, ecxIn, data[0], data[1], data[2], data[3]);

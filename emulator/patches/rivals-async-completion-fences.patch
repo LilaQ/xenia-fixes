@@ -1,0 +1,296 @@
+--- a/src/xenia/gpu/command_processor.h
++++ b/src/xenia/gpu/command_processor.h
+@@ -210,11 +210,18 @@
+   }
+   uint32_t trace_playback_title_id() const { return trace_playback_title_id_; }
+ 
++  // Replay snapshot restoration and CPU memory inspection must not race GPU
++  // writes still queued after the last swap. Called on the GPU thread.
++  virtual void SynchronizeTracePlayback() {}
++
+   virtual void TracePlaybackWroteMemory(uint32_t base_ptr, uint32_t length) = 0;
+ 
+   // Shadowed by backends that route memory export through guest RAM (see
+   // command_processor_memexport.inc). No-ops where export output never reaches
+   // the CPU, so there is nothing to wait for.
++  virtual bool TryWriteMemexportGpuFence(uint32_t address, uint32_t value) {
++    return false;
++  }
+   void AwaitMemexportForFence() {}
+   void AwaitMemexportForCoherency(uint32_t base_bytes, uint32_t size_bytes) {}
+   // Called before the command processor lets the guest see that the GPU got
+@@ -372,6 +379,7 @@
+   virtual void ReturnFromWait();
+ 
+   virtual void PollCompletedSubmission() {}
++  virtual bool HasPendingCpuFenceWrites() const { return false; }
+ 
+   // Used by strict ZPD to distinguish normal in flight latency from a
+   // genuinely stuck report.
+--- a/src/xenia/gpu/command_processor.cc
++++ b/src/xenia/gpu/command_processor.cc
+@@ -521,6 +521,11 @@
+       PrepareForWait();
+       uint32_t loop_count = 0;
+       do {
++        // GPU completion may publish a CPU fence while the guest is waiting
++        // without adding further packets to the ring.
++        if (HasPendingCpuFenceWrites()) {
++          PollCompletedSubmission();
++        }
+         // If we spin around too much, revert to a "low-power" state.
+         if (loop_count > 500) {
+           constexpr int wait_time_ms = 2;
+@@ -1047,7 +1052,7 @@
+   if (zpd_mode_ == ZPDMode::kStrict && zpd_awaited_report_count_) {
+     PrepareZPDForWait();
+   }
+-  if (viz_pending_resolves_) {
++  if (viz_pending_resolves_ || HasPendingCpuFenceWrites()) {
+     PollCompletedSubmission();
+   }
+ }
+--- a/src/xenia/gpu/pm4_command_processor_implement.h
++++ b/src/xenia/gpu/pm4_command_processor_implement.h
+@@ -883,6 +883,9 @@
+   bool matched = false;
+ 
+   do {
++    if (COMMAND_PROCESSOR::HasPendingCpuFenceWrites()) {
++      COMMAND_PROCESSOR::PollCompletedSubmission();
++    }
+     uint32_t value = value_ref;
+     if (is_memory) {
+       trace_writer_.WriteMemoryRead(CpuToGpu(poll_reg_addr & ~uint32_t(0x3)),
+@@ -1114,22 +1117,19 @@
+   // Writeback initiator.
+   COMMAND_PROCESSOR::WriteEventInitiator(event_type);
+ 
+-  // The guest treats this fence as "the GPU is done", so awaited export output
+-  // it is about to read has to be in guest RAM first.
++  auto endianness = static_cast<xenos::Endian>(address & 0x3);
++  address &= ~0x3;
++  // Counter events retain the original completion-time counter sample. Only
++  // literal completion values can be published asynchronously.
++  if (!(initiator & 0x80000000) &&
++      COMMAND_PROCESSOR::TryWriteMemexportGpuFence(
++          address, GpuSwap(value, endianness))) {
++    return true;
++  }
+   COMMAND_PROCESSOR::AwaitMemexportForFence();
+   COMMAND_PROCESSOR::SubmitResolvesForGuestSync();
+-
+-  uint32_t data_value;
+-  if ((initiator >> 31) & 0x1) {
+-    // Write counter (GPU vblank counter?).
+-    data_value = counter_;
+-  } else {
+-    // Write value.
+-    data_value = value;
+-  }
+-  auto endianness = static_cast<xenos::Endian>(address & 0x3);
+-  address &= ~0x3;
+-  data_value = GpuSwap(data_value, endianness);
++  uint32_t data_value =
++      GpuSwap((initiator & 0x80000000) ? counter_ : value, endianness);
+   uint8_t* write_destination = memory_->TranslatePhysical(address);
+   if (address > 0x1FFFFFFF) {
+     uint32_t writeback_base =
+--- a/src/xenia/gpu/trace_player.cc
++++ b/src/xenia/gpu/trace_player.cc
+@@ -106,6 +106,15 @@
+ 
+ void TracePlayer::WaitOnPlayback() {
+   xe::threading::Wait(playback_event_.get(), true);
++  // Parsing completion alone does not finish asynchronous GPU fence stores.
++  // In particular, the next replay pass restores snapshots on the CPU.
++  threading::Fence completed;
++  auto* processor = graphics_system_->command_processor();
++  processor->CallInThread([&]() {
++    processor->SynchronizeTracePlayback();
++    completed.Signal();
++  });
++  completed.Wait();
+ }
+ 
+ void TracePlayer::PlayTrace(const uint8_t* trace_data, size_t trace_size,
+@@ -228,6 +237,9 @@
+       case TraceCommandType::kMemoryRead: {
+         auto cmd = reinterpret_cast<const MemoryCommand*>(trace_ptr);
+         trace_ptr += sizeof(*cmd);
++        // The captured CPU snapshot may replace host-imported GPU input.
++        // Finish earlier consumers before overwriting their backing RAM.
++        command_processor->SynchronizeTracePlayback();
+         DecompressMemory(cmd->encoding_format, trace_ptr, cmd->encoded_length,
+                          memory->TranslatePhysical(cmd->base_ptr),
+                          cmd->decoded_length);
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -85,11 +85,15 @@
+ 
+   void RequestFrameTrace(const std::filesystem::path& root_path) override;
+ 
++  void SynchronizeTracePlayback() override;
+   void TracePlaybackWroteMemory(uint32_t base_ptr, uint32_t length) override;
+ 
+   void RestoreEdramSnapshot(const void* snapshot) override;
+ 
+   void PollCompletedSubmission() override;
++  bool HasPendingCpuFenceWrites() const override {
++    return !rivals_event_fences_.empty();
++  }
+ 
+   ui::d3d12::D3D12Provider& GetD3D12Provider() const {
+     return *static_cast<ui::d3d12::D3D12Provider*>(
+@@ -530,6 +534,15 @@
+   // with the other fragments because the declarations below name its
+   // ReadbackStagingSlot.
+ #include "../command_processor_readback_staging.inc"
++  struct RivalsEventFence {
++    uint64_t submission;
++    uint32_t address;
++    uint32_t value;
++  };
++  std::deque<RivalsEventFence> rivals_event_fences_;
++  bool rivals_pumping_event_fences_ = false;
++  void PumpRivalsEventFences();
++  bool TryWriteMemexportGpuFence(uint32_t address, uint32_t value) override;
+   bool TryMemexportGpuCoherency(uint32_t base_bytes,
+                                uint32_t size_bytes) override;
+   void StageMemexportReadback();
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -39,8 +39,11 @@
+ #include "xenia/gpu/spirv_shader.h"
+ #include "xenia/gpu/spirv_shader_translator.h"
+ 
++DEFINE_bool(d3d12_rivals_gpu_event_fences, false,
++            "Rivals: publish completion values after GPU completion without "
++            "blocking command-stream parsing.", "GPU");
+ DEFINE_bool(d3d12_rivals_gpu_atlas_coherency, false,
+-            "Order Rivals TU2 atlas texture consumers on the GPU, retaining "
++            "Order Rivals TU2 export consumers on the GPU, retaining "
+             "CPU fence and readback synchronization.", "GPU");
+ 
+ DEFINE_bool(d3d12_bindless, true,
+@@ -206,6 +209,13 @@
+   CommandProcessor::RequestFrameTrace(root_path);
+ }
+ 
++void D3D12CommandProcessor::SynchronizeTracePlayback() {
++  if (AwaitAllQueueOperationsCompletion()) {
++    PumpRivalsEventFences();
++    FlushMemexportStagingReadback();
++  }
++}
++
+ void D3D12CommandProcessor::TracePlaybackWroteMemory(uint32_t base_ptr,
+                                                      uint32_t length) {
+   shared_memory_->MemoryInvalidationCallback(base_ptr, length, true);
+@@ -224,6 +234,7 @@
+   // Strict ZPD just needs the completion timeline updated and any ready query
+   // resolves drained here.
+   completion_timeline_->AwaitSubmissionAndUpdateCompleted(0);
++  PumpRivalsEventFences();
+   PumpQueryResolves();
+ }
+ 
+@@ -3883,12 +3894,61 @@
+   memexport_cpu_wait_max_ticks_ = std::max(memexport_cpu_wait_max_ticks_, ticks);
+ }
+ 
++void D3D12CommandProcessor::PumpRivalsEventFences() {
++  if (rivals_pumping_event_fences_) {
++    return;
++  }
++  rivals_pumping_event_fences_ = true;
++  const uint64_t completed = GetCompletedSubmission();
++  while (!rivals_event_fences_.empty() &&
++         rivals_event_fences_.front().submission <= completed) {
++    const RivalsEventFence fence = rivals_event_fences_.front();
++    rivals_event_fences_.pop_front();
++    xe::store(memory_->TranslatePhysical(fence.address), fence.value);
++  }
++  rivals_pumping_event_fences_ = false;
++}
++
++bool D3D12CommandProcessor::TryWriteMemexportGpuFence(
++    uint32_t address, uint32_t value) {
++  if (!cvars::d3d12_rivals_gpu_event_fences ||
++      !memexport_await_pending_ || !memexport_staged_.empty() ||
++      !shared_memory_->GetHostBuffer() || trace_writer_.is_open() ||
++      (address & 3) || address > SharedMemory::kBufferSize - 4 ||
++      WritableGuestRangeLength(address, 4) != 4 ||
++      rivals_event_fences_.size() >= 4096) {
++    return false;
++  }
++  auto* kernel = kernel::KernelState::shared();
++  uint32_t title_id = kernel ? kernel->title_id() : 0;
++  if (!title_id) title_id = trace_playback_title_id();
++  if (title_id != 0x454109C6) {
++    return false;
++  }
++  SubmitResolvesForGuestSync();
++  if (!EndSubmission(false)) {
++    return false;
++  }
++  // No empty submissions or GPU buffer copies for consecutive event words.
++  // Publish each value only when the timeline proves all preceding exports
++  // complete; command parsing can continue until then.
++  const uint64_t owner = GetCurrentSubmission() - 1;
++  rivals_event_fences_.push_back({owner, address, value});
++  memexport_awaited_submission_ = owner;
++  PumpRivalsEventFences();
++  static thread_local uint64_t queued = 0;
++  if (++queued <= 4 ||
++      (cvars::d3d12_submission_timing && !(queued % 240))) {
++    XELOGI("Rivals queued completion fence: {:08X}={:08X}, owner {}",
++           address, value, owner);
++  }
++  return true;
++}
++
+ bool D3D12CommandProcessor::TryMemexportGpuCoherency(
+     uint32_t base_bytes, uint32_t size_bytes) {
+   if (!cvars::d3d12_rivals_gpu_atlas_coherency ||
+-      !shared_memory_->GetHostBuffer() || !memexport_staged_.empty() ||
+-      size_bytes != 0x00800000 ||
+-      (base_bytes != 0x0CCA6000 && base_bytes != 0x0D4A6000)) {
++      !shared_memory_->GetHostBuffer() || !memexport_staged_.empty()) {
+     return false;
+   }
+   auto* kernel = kernel::KernelState::shared();
+@@ -3899,17 +3959,20 @@
+           0x03000200) {
+     return false;
+   }
+-  // The captured TU2 packets flush VC/TC for an 8 MB generated atlas and
+-  // immediately sample it on the GPU. The texture-load path copies its dirty
+-  // host-buffer ranges to the device buffer, ordered on this same queue.
++  // Live TU2 stacks also wait here for 0x37000-byte intermediate ranges,
++  // not only generated atlases. VC/TC invalidation
++  // prepares GPU consumers; CPU visibility is still guarded by real fences.
++  // Texture loads copy dirty host-buffer ranges to the device buffer, ordered
++  // on this same queue. The caller has verified overlap with exported data.
+   // Transitioning out of UAV orders those writes without draining the GPU.
+   // Keep memexport_await_pending_ and its owner: EVENT_WRITE_SHD / interrupts
+   // must still make the output CPU-visible before the guest observes them.
+   shared_memory_->UseHostAsCopySource();
+   SubmitBarriers();
+   static thread_local uint64_t queued = 0;
+-  if (++queued <= 4 || !(queued % 240)) {
+-    XELOGI("Rivals GPU atlas coherency: {:08X}+{:08X}, CPU fence retained",
++  if (++queued <= 4 ||
++      (cvars::d3d12_submission_timing && !(queued % 240))) {
++    XELOGI("Rivals GPU consumer coherency: {:08X}+{:08X}, CPU fence retained",
+            base_bytes, size_bytes);
+   }
+   return true;
+@@ -4351,6 +4414,7 @@
+   completion_timeline_->AwaitSubmissionAndUpdateCompleted(await_submission);
+ 
+   const uint64_t completed_submission = GetCompletedSubmission();
++  PumpRivalsEventFences();
+ 
+   // Reclaim command allocators.
+   while (command_allocator_submitted_first_) {

@@ -1,0 +1,16 @@
+title_name = "Fallout: New Vegas Ultimate Edition (TU5)"
+title_id = "425307E0"
+hash = "BEC503E11EB9D8F9"
+
+[[patch]]
+    name = "60 FPS"
+    desc = "Use one vblank instead of two for the game's iPresentInterval=2 setting. Keep host output capped at 60 FPS and time_scalar=1."
+    author = "Codex"
+    is_enabled = true
+
+    # TU5 reconstructed from the installed update; after binding its 210 kernel
+    # import thunks, the code hash matches BEC503E11EB9D8F9.
+    # Verified interval switch: li r11, 2 -> li r11, 1; value is encoded at bit 8.
+    [[patch.be32]]
+        address = 0x821FC574
+        value = 0x39600001

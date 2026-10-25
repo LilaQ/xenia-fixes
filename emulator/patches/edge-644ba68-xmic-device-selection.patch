@@ -1,0 +1,148 @@
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+@@ -36,6 +36,18 @@
+               "Capture device name filter; empty selects a USB microphone if "
+               "present, otherwise the system default",
+               "Kernel");
++DEFINE_string(mic_device_name_2, "",
++              "Capture device name filter for microphone 2; empty selects "
++              "another USB microphone",
++              "Kernel");
++DEFINE_string(mic_device_name_3, "",
++              "Capture device name filter for microphone 3; empty selects "
++              "another USB microphone",
++              "Kernel");
++DEFINE_string(mic_device_name_4, "",
++              "Capture device name filter for microphone 4; empty selects "
++              "another USB microphone",
++              "Kernel");
+ 
+ namespace xe {
+ namespace kernel {
+@@ -168,48 +180,75 @@
+                        [](unsigned char c) { return std::tolower(c); });
+         return value;
+       };
+-      const std::string wanted = lowercase(
+-          cvars::mic_device_name.empty() ? "usb" : cvars::mic_device_name);
+-      ma_uint32 primary_index = capture_count;
+-      for (ma_uint32 i = 0; i < capture_count; ++i) {
+-        if (lowercase(capture[i].name).find(wanted) != std::string::npos) {
+-          primary_index = i;
+-          break;
++      if (index_ == 0 && !devices_logged_) {
++        XELOGI("XMic: {} host capture devices", capture_count);
++        for (ma_uint32 i = 0; i < capture_count; ++i) {
++          XELOGI("XMic: capture {}: '{}' default={}", i, capture[i].name,
++                 capture[i].isDefault != 0);
+         }
++        devices_logged_ = true;
+       }
+-      if (primary_index == capture_count &&
+-          !cvars::mic_device_name.empty()) {
+-        XELOGW("XMic: capture device '{}' not found; using system default",
+-               cvars::mic_device_name);
+-      }
+-      if (primary_index == capture_count) {
++      const std::array<std::string, 4> filters = {
++          cvars::mic_device_name, cvars::mic_device_name_2,
++          cvars::mic_device_name_3, cvars::mic_device_name_4};
++      std::array<ma_uint32, 4> assigned;
++      assigned.fill(capture_count);
++      for (uint32_t slot = 0; slot <= index_; ++slot) {
++        const auto taken = [&](ma_uint32 candidate) {
++          return std::find(assigned.begin(), assigned.begin() + slot,
++                           candidate) != assigned.begin() + slot;
++        };
++        const std::string wanted = lowercase(
++            filters[slot].empty() ? "usb" : filters[slot]);
+         for (ma_uint32 i = 0; i < capture_count; ++i) {
+-          if (capture[i].isDefault) {
+-            primary_index = i;
++          if (!taken(i) &&
++              lowercase(capture[i].name).find(wanted) != std::string::npos) {
++            assigned[slot] = i;
+             break;
+           }
+         }
+-      }
+-      ma_uint32 selected_index = primary_index;
+-      if (index_ != 0) {
+-        selected_index = capture_count;
+-        uint32_t usb_index = 0;
+-        for (ma_uint32 i = 0; i < capture_count; ++i) {
+-          if (i == primary_index ||
+-              lowercase(capture[i].name).find("usb") == std::string::npos) {
+-            continue;
++        if (assigned[slot] != capture_count) {
++          continue;
++        }
++        if (slot == 0) {
++          if (!filters[slot].empty()) {
++            XELOGW("XMic: capture device '{}' not found; using system default",
++                   filters[slot]);
+           }
+-          if (++usb_index == index_) {
+-            selected_index = i;
+-            break;
++          for (ma_uint32 i = 0; i < capture_count; ++i) {
++            if (capture[i].isDefault) {
++              assigned[slot] = i;
++              break;
++            }
+           }
+-        }
+-        if (selected_index == capture_count) {
+-          retry_after_ =
+-              std::chrono::steady_clock::now() + std::chrono::seconds(3);
+-          return false;
++        } else if (filters[slot].empty()) {
++          // A device with a non-USB name is safe to auto-select only when it
++          // is the sole remaining capture endpoint.
++          ma_uint32 remaining = capture_count;
++          for (ma_uint32 i = 0; i < capture_count; ++i) {
++            if (!taken(i)) {
++              if (remaining != capture_count) {
++                remaining = capture_count;
++                break;
++              }
++              remaining = i;
++            }
++          }
++          assigned[slot] = remaining;
+         }
+       }
++      const ma_uint32 selected_index = assigned[index_];
++      if (selected_index == capture_count && index_ != 0) {
++        if (!missing_reported_) {
++          XELOGW("XMic: microphone {} has no distinct host capture device "
++                 "(filter '{}')",
++                 index_, filters[index_]);
++          missing_reported_ = true;
++        }
++        retry_after_ =
++            std::chrono::steady_clock::now() + std::chrono::seconds(3);
++        return false;
++      }
+       if (selected_index < capture_count) {
+         selected_id = capture[selected_index].id;
+         selected_name = capture[selected_index].name;
+@@ -327,6 +366,8 @@
+   ma_device device_{};
+   bool context_initialized_ = false;
+   bool device_initialized_ = false;
++  bool devices_logged_ = false;
++  bool missing_reported_ = false;
+   std::atomic<bool> running_{false};
+   std::chrono::steady_clock::time_point retry_after_{};
+ };
+@@ -406,6 +447,9 @@
+   const uint32_t request_index = static_cast<uint32_t>(request_type);
+   const uint32_t user_index = device_ptr->info.user_index;
+   const uint32_t request_count = ++request_counts[user_index][request_index];
++  if (request_type == XMicRequestType::MicGetStatus && request_count <= 2) {
++    XELOGI("XMic: status microphone {} connected={}", user_index, connected);
++  }
+   if (request_type != XMicRequestType::MicGetStatus && request_count <= 4) {
+     XELOGI("XMic: request={} user={} data0={:08X} data1={:08X} "
+            "unk1={:08X} context={:08X} completion={:08X} connected={}",

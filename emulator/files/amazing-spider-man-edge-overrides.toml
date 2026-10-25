@@ -1,0 +1,36 @@
+# Shared Edge setup for The Amazing Spider-Man (415608B5)
+# and The Amazing Spider-Man 2 (41560905).
+# The first game's installed version has media 63461509
+# and default.xex module hash E8E6CA338A75D5F4.
+# Apply to an Edge game config while retaining the owner's Profiles section.
+# This removes Edge's guest display cap and limits host presentation to 60;
+# it is not a verified engine timing patch or a guarantee of 60 FPS gameplay.
+# Preserve the ROV-equivalent path and readback needed by this title.
+
+[Display]
+fullscreen = true
+
+[GPU]
+gpu = "d3d12"
+guest_display_refresh_cap = false
+framerate_limit = 60
+render_target_path = "accuracy"
+readback_resolve = true
+occlusion_query = "strict"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[General]
+apply_patches = true
+launch_module = ""
+time_scalar = 1
+
+[HID]
+hid = "sdl"
+
+[Storage]
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+
+[UI]
+show_achievement_notification = true

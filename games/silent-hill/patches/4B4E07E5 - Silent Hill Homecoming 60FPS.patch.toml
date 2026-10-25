@@ -1,0 +1,16 @@
+title_name = "Silent Hill: Homecoming"
+title_id = "4B4E07E5"
+hash = "3DB72D7712F6ECD9"
+# PAL media 7F02C49C, base version 00000003.
+
+[[patch]]
+    name = "60 FPS engine limits and render pacing"
+    desc = "Raises fpsLimit and maxFPSLimit to 60 and halves the independent render wait from 33.323 ms to 16.657 ms. Keep time_scalar at 1. Gameplay, cutscenes and QTE timing require an interactive check."
+    author = "Local cabinet patch"
+    is_enabled = true
+    [[patch.be32]]
+        address = 0x8256B858 # li r10,30; stores to engine fields +0xE4 and +0xE8
+        value = 0x3940003C # li r10,60; original 0x3940001E
+    [[patch.be32]]
+        address = 0x82050710 # Only read by SysUpdate_Render's counter-based frame wait
+        value = 0x418540DA # 1000/60 - 0.01 ms; original 0x42054B18 (1000/30 - 0.01)

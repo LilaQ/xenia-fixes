@@ -1,0 +1,37 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -58,6 +58,11 @@
+ DEFINE_bool(trace_readback_timing, false,
+             "Log bounded resolve CPU-fault copy timings for diagnosis.",
+             "GPU.Debug");
++
++DEFINE_bool(d3d12_skip_no_effect_draws, false,
++            "Skip draws with no color, depth, stencil or memory-export writes "
++            "when neither report queries nor VIZ surveys consume coverage.",
++            "GPU");
+ 
+ DEFINE_bool(evil_within_async_feedback, false,
+             "425307F4 only: use a completed CPU-feedback resolve up to "
+@@ -3067,6 +3072,22 @@
+       pixel_shader && (pixel_shader->memexport_eM_written() != 0);
+   const bool memexport_used = memexport_used_vertex || memexport_used_pixel;
+ 
++  // These draws cannot alter guest-visible data or counters. In particular,
++  // keep all active query/survey draws, all exports, and conservative stencil
++  // or depth writes even when no color target is enabled.
++  if (cvars::d3d12_skip_no_effect_draws && !memexport_used && !viz_survey &&
++      !active_segment_.report_measuring()) {
++    const auto depth = draw_util::GetNormalizedDepthControl(regs);
++    const uint32_t color_mask = pixel_shader
++        ? draw_util::GetNormalizedColorMask(regs,
++                                           pixel_shader->writes_color_targets())
++        : 0;
++    if (!color_mask && !depth.z_write_enable && !depth.stencil_enable &&
++        (!pixel_shader || !pixel_shader->writes_depth())) {
++      return true;
++    }
++  }
++
+   memexport_ranges_.clear();
+   if (memexport_used_vertex) {
+     draw_util::AddMemExportRanges(regs, *vertex_shader, memexport_ranges_);

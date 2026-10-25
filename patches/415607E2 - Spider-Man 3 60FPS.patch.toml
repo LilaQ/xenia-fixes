@@ -1,0 +1,17 @@
+title_name = "Spider-Man 3"
+title_id = "415607E2"
+hash = "74EB693009B1AF55"
+# Default.xex, media 5E753988, base version 0.0.0.1, no title update.
+
+[[patch]]
+name = "60 FPS startup sync mode"
+desc = "Select the engine's one-vblank mode at game startup. The original call selects mode 2 after the device initializer has already selected interval 1, overwriting the initial interval with 2. Use a 60 Hz emulator display, time_scalar=1 and full readback for correct lighting. Sustained FPS still requires gameplay verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x82833D60
+value = 0x38600001 # li r3,1 (original: lwz r3,0x3C40(r11) / 0x806B3C40)
+# Original mode at 82CB3C40 is 2. The immediately following call goes to
+# 8284E180 -> 8284E0F8, whose mode 1 and 2 cases select intervals 1 and 2.
+# Both cases preserve the same ancillary flag write and initialization calls.

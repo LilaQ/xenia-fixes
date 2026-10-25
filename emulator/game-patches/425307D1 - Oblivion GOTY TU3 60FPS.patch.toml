@@ -1,0 +1,18 @@
+title_name = "The Elder Scrolls IV: Oblivion GOTY (TU3)"
+title_id = "425307D1"
+hash = "B656ED4D389EEF2C"
+# Media 013FE217, base 0.0.0.9 updated to 0.0.3.9.
+# Relocates the original GOTY 60-FPS patch by Margen67 to the verified TU3
+# presentation-interval dispatch. The base-image patch does not match TU3.
+
+[[patch]]
+name = "60 FPS"
+desc = "Select one vblank instead of two in the TU3 presentation-interval dispatch. Use a 60 FPS host limit and normal time_scalar=1."
+author = "Margen67; local TU3 port"
+is_enabled = true
+
+[[patch.be8]]
+address = 0x8255DDCF
+value = 0x01
+# 8255DDCC: 39400002 (li r10,2) -> 39400001 (li r10,1).
+# Corresponds to the original GOTY patch at 8255F547 (40AFA2A39DE3C37D).

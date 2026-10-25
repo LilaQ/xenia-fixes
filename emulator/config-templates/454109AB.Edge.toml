@@ -1,0 +1,67 @@
+# Pair with the AO4.Main.xex hash-matched 60 Hz clocks and pacing patch.
+# Select xenia_edge_cartel.exe; the stock Edge binary lacks the geometry fix.
+# Merge these values into the installed Edge build's generated config.
+# Supply the existing content root and profile XUID when migrating from Canary.
+
+[Display]
+fullscreen = true
+
+[GPU]
+gpu = "d3d12"
+framerate_limit = 60
+guest_display_refresh_cap = false
+readback_resolve = true
+render_target_path = "performance"
+async_shader_compilation = false
+async_shader_skip_draws = false
+async_shader_vs_interpreter = false
+occlusion_query = "fast"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+enable_host_buffer = true
+memexport_enable = true
+memexport_await_pixel_exports = true
+memexport_await_vertex_exports = true
+d3d12_await_host_buffer_reads = true
+d3d12_mirror_host_geometry = true
+d3d12_split_geometry_copy_fence = true
+d3d12_skip_no_effect_draws = true
+
+[GPU.Debug]
+trace_cpu_timing = false
+trace_draw_timing = false
+trace_submission_timing = false
+trace_readback_timing = false
+trace_swap_timing = false
+trace_gpu_stream = false
+
+[CPU]
+enable_early_precompilation = false
+
+[Content]
+license_mask = 1
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Kernel]
+guest_scheduler = false
+in_process_title_relaunch = true
+
+[HID]
+hid = "sdl"
+
+[Storage]
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+cache_root = "D:/LaunchBox/Emulators/Xenia Edge/cache"
+content_root = "{{EXISTING_CONTENT_ROOT}}"
+
+[Profiles]
+logged_profile_slot_0_xuid = "{{EXISTING_PROFILE_XUID}}"
+
+[UI]
+show_achievement_notification = true
+
+# Mirror [GPU] and [Kernel] in config/454109AB.config.toml so saved UI
+# overrides retain the same host-buffer fix, display timing and 60 FPS cap.

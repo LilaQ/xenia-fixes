@@ -1,0 +1,14 @@
+title_name = "Hitman: Blood Money HD"
+title_id = "534307DB"
+hash = "4B32E4CDC4BF4164"
+# HD Trilogy disc 2, default.xex, Media ID 2783613B, base version 4.
+
+[[patch]]
+    name = "60 FPS presentation interval"
+    desc = "Sets the game's D3D presentation interval from two vblanks to one. Keep vsync enabled and time_scalar at 1. Requires enough CPU/GPU performance; verify gameplay, camera and cutscene timing."
+    author = "Local cabinet patch"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x822011E4 # li r5,2; stored at r30+0x488, presentation parameters + 0x34
+        value = 0x38A00001 # li r5,1 (original: 0x38A00002)

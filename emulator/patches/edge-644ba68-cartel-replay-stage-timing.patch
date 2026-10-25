@@ -1,0 +1,249 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -12,6 +12,7 @@
+ #include <algorithm>
+ #include <cstdarg>
+ #include <cstring>
++#include <mutex>
+ 
+ #include "xenia/base/assert.h"
+ #include "xenia/base/byte_order.h"
+@@ -51,6 +52,15 @@
+             "off during gameplay. Logs at shutdown after GPU completion.",
+             "GPU.Debug");
+ 
++DEFINE_bool(trace_submission_timing, false,
++            "Record GPU timestamps around command submissions for replay "
++            "without per-draw timing overhead. Off during gameplay.",
++            "GPU.Debug");
++
++DEFINE_bool(trace_cpu_timing, false,
++            "Aggregate renderer CPU stage times per frame for replay analysis.",
++            "GPU.Debug");
++
+ DEFINE_bool(trace_swap_timing, false,
+             "Log 120-swap host cadence windows for isolated game testing.",
+             "GPU.Debug");
+@@ -88,6 +98,33 @@
+ namespace xe {
+ namespace gpu {
+ namespace d3d12 {
++
++namespace {
++struct TraceCpuFrame {
++  uint64_t ticks[8] = {};
++  uint32_t calls[8] = {};
++};
++std::mutex trace_cpu_mutex;
++std::unordered_map<uint64_t, TraceCpuFrame> trace_cpu_frames;
++class TraceCpuScope {
++ public:
++  TraceCpuScope(uint64_t frame, uint32_t stage) : frame_(frame), stage_(stage) {
++    start_ = cvars::trace_cpu_timing ? Clock::QueryHostTickCount() : 0;
++  }
++  ~TraceCpuScope() {
++    if (start_) {
++      const uint64_t elapsed = Clock::QueryHostTickCount() - start_;
++      std::lock_guard<std::mutex> lock(trace_cpu_mutex);
++      auto& frame = trace_cpu_frames[frame_];
++      frame.ticks[stage_] += elapsed;
++      ++frame.calls[stage_];
++    }
++  }
++ private:
++  uint64_t frame_, start_;
++  uint32_t stage_;
++};
++}
+ 
+ // Generated with `xb buildshaders`.
+ namespace shaders {
+@@ -2510,6 +2547,7 @@
+ 
+ bool D3D12CommandProcessor::FaultCopyResolveToGuestRam(
+     const std::vector<std::pair<uint32_t, uint32_t>>& ranges) {
++  TraceCpuScope cpu_readback(frame_current_, 7);
+   if (ranges.empty()) {
+     return false;
+   }
+@@ -2898,7 +2936,9 @@
+ 
+ uint32_t D3D12CommandProcessor::BeginTraceDrawTiming(
+     uint64_t vs, uint64_t ps, uint32_t vertices, uint32_t surface) {
+-  if (!cvars::trace_draw_timing || trace_draw_timing_unavailable_ ||
++  if (!(vs == UINT64_MAX - 4 ? cvars::trace_submission_timing
++                            : cvars::trace_draw_timing) ||
++      trace_draw_timing_unavailable_ ||
+       trace_draw_timings_.size() >= kTraceDrawTimingCapacity) {
+     return UINT32_MAX;
+   }
+@@ -2958,6 +2998,8 @@
+     struct FrameTiming {
+       uint64_t start = UINT64_MAX, end = 0;
+       double draw_us = 0, resolve_us = 0, transfer_us = 0, texture_us = 0;
++      double submission_us = 0;
++      uint32_t submissions = 0;
+     };
+     std::unordered_map<uint64_t, FrameTiming> frame_timings;
+     double sum_us = 0;
+@@ -2974,7 +3016,10 @@
+       if (row.vertex_shader == UINT64_MAX) frame.resolve_us += us;
+       else if (row.vertex_shader == UINT64_MAX - 1) frame.transfer_us += us;
+       else if (row.vertex_shader == UINT64_MAX - 2) frame.texture_us += us;
+-      else frame.draw_us += us;
++      else if (row.vertex_shader == UINT64_MAX - 4) {
++        frame.submission_us += us;
++        ++frame.submissions;
++      } else frame.draw_us += us;
+       sum_us += us;
+       XELOGI("TraceDrawGPU index={} frame={} vs={:016X} ps={:016X} "
+              "vertices={} surface={:08X} us={:.3f}",
+@@ -2983,6 +3028,10 @@
+     }
+     for (const auto& pair : frame_timings) {
+       const auto& frame = pair.second;
++      if (frame.submissions) {
++        XELOGI("TraceSubmissionGPU frame={} gpu_us={:.3f} submissions={}",
++               pair.first, frame.submission_us, frame.submissions);
++      }
+       XELOGI("TraceFrameGPU frame={} span_us={:.3f} draw_us={:.3f} "
+              "resolve_us={:.3f} transfer_us={:.3f} texture_us={:.3f}", pair.first,
+              double(frame.end - frame.start) * 1000000.0 /
+@@ -2992,6 +3041,21 @@
+     XELOGI("TraceDrawGPU total_draws={} sum_draw_us={:.3f} "
+            "(instrumented GPU scopes; excludes CPU waits and uninstrumented work; timing adds overhead)",
+            trace_draw_timing_resolved_, sum_us);
++  }
++  if (cvars::trace_cpu_timing) {
++    std::lock_guard<std::mutex> lock(trace_cpu_mutex);
++    constexpr const char* names[] = {
++        "draw", "primitive", "targets", "textures", "bindings", "submission",
++        "completion", "readback"};
++    for (const auto& pair : trace_cpu_frames) {
++      for (uint32_t i = 0; i < 8; ++i) {
++        XELOGI("TraceCpu frame={} stage={} us={:.3f} calls={}", pair.first,
++               names[i], double(pair.second.ticks[i]) * 1000000.0 /
++                   double(Clock::QueryHostTickFrequency()),
++               pair.second.calls[i]);
++      }
++    }
++    trace_cpu_frames.clear();
+   }
+   DestroyReadbackStagingBuffer(trace_draw_timing_readback_);
+   trace_draw_timing_heap_.Reset();
+@@ -3007,6 +3071,7 @@
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+ 
++  TraceCpuScope cpu_draw(frame_current_, 0);
+   ID3D12Device* device = GetD3D12Provider().GetDevice();
+   const RegisterFile& regs = *register_file_;
+ 
+@@ -3095,6 +3160,14 @@
+   if (memexport_used_pixel) {
+     draw_util::AddMemExportRanges(regs, *pixel_shader, memexport_ranges_);
+   }
++  if (cvars::trace_cpu_timing && memexport_used_pixel && frame_current_ <= 4) {
++    for (uint32_t index : pixel_shader->memexport_stream_constants()) {
++      auto stream = regs.GetMemExportStream(regs.Get<reg::SQ_PS_CONST>().base + index);
++      XELOGI("TracePixelExport frame={} constant={} base={:08X} format={} count={}",
++             frame_current_, index, uint32_t(stream.base_address) << 2,
++             uint32_t(stream.format), uint32_t(stream.index_count));
++    }
++  }
+   // Exports land in guest RAM through the host buffer.
+   if (cvars::memexport_enable && shared_memory_->GetHostBuffer() != nullptr) {
+     for (const draw_util::MemExportRange& memexport_range : memexport_ranges_) {
+@@ -3119,7 +3192,11 @@
+ 
+   // Process primitives.
+   PrimitiveProcessor::ProcessingResult primitive_processing_result;
+-  if (!primitive_processor_->Process(primitive_processing_result)) {
++  const bool primitive_processed = [&]() {
++    TraceCpuScope cpu_primitive(frame_current_, 1);
++    return primitive_processor_->Process(primitive_processing_result);
++  }();
++  if (!primitive_processed) {
+     return false;
+   }
+   if (!primitive_processing_result.host_draw_vertex_count) {
+@@ -3211,9 +3288,12 @@
+   // Set up the render targets - this may perform dispatches and draws.
+   const uint32_t transfer_timing = BeginTraceDrawTiming(
+       UINT64_MAX - 1, 0, 0, register_file_->values[XE_GPU_REG_RB_SURFACE_INFO]);
+-  const bool targets_updated = render_target_cache_->Update(
+-      is_rasterization_done, normalized_depth_control,
+-      normalized_color_mask, *vertex_shader, window_offset_tiles);
++  const bool targets_updated = [&]() {
++    TraceCpuScope cpu_targets(frame_current_, 2);
++    return render_target_cache_->Update(
++        is_rasterization_done, normalized_depth_control,
++        normalized_color_mask, *vertex_shader, window_offset_tiles);
++  }();
+   EndTraceDrawTiming(transfer_timing);
+   if (!targets_updated) {
+     return false;
+@@ -3354,7 +3434,10 @@
+            : 0);
+   const uint32_t texture_timing = BeginTraceDrawTiming(
+       UINT64_MAX - 2, 0, 0, used_texture_mask);
+-  texture_cache_->RequestTextures(used_texture_mask);
++  {
++    TraceCpuScope cpu_textures(frame_current_, 3);
++    texture_cache_->RequestTextures(used_texture_mask);
++  }
+   EndTraceDrawTiming(texture_timing);
+ 
+   // Bind the pipeline after configuring it and doing everything that may bind
+@@ -4233,6 +4316,7 @@
+ 
+ void D3D12CommandProcessor::CheckSubmissionCompletion(
+     uint64_t await_submission) {
++  TraceCpuScope cpu_completion(frame_current_, 6);
+   if (await_submission >= GetCurrentSubmission()) {
+     if (submission_open_) {
+       EndSubmission(false);
+@@ -4380,6 +4464,8 @@
+     // end of the submission (when async pipeline creation requests are
+     // fulfilled).
+     deferred_command_list_.Reset();
++    trace_submission_timing_slot_ = cvars::trace_submission_timing
++        ? BeginTraceDrawTiming(UINT64_MAX - 4, 0, 0, 0) : UINT32_MAX;
+ 
+     // Resume the active query segment.
+     OpenQuerySegment(false);
+@@ -4484,6 +4570,7 @@
+ }
+ 
+ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
++  TraceCpuScope cpu_submit(frame_current_, 5);
+   const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+ 
+   // Make sure there is a command allocator to write commands to.
+@@ -4523,6 +4610,8 @@
+         deferred_command_list_, GetCurrentSubmission(), submission_open_);
+ 
+     pipeline_cache_->EndSubmission();
++    EndTraceDrawTiming(trace_submission_timing_slot_);
++    trace_submission_timing_slot_ = UINT32_MAX;
+     ResolveTraceDrawTimings();
+ 
+     // Submit barriers now because resources with the queued barriers may be
+@@ -4838,6 +4927,7 @@
+     uint32_t normalized_color_mask,
+     const draw_util::HostDepthPolygonOffset* host_depth_polygon_offset,
+     bool interpreter_placeholder, int32_t window_offset_tiles) {
++  TraceCpuScope cpu_bindings(frame_current_, 4);
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -456,6 +456,7 @@
+   std::vector<TraceDrawTiming> trace_draw_timings_;
+   uint64_t trace_draw_timing_frequency_ = 0;
+   uint32_t trace_draw_timing_resolved_ = 0;
++  uint32_t trace_submission_timing_slot_ = UINT32_MAX;
+   bool trace_draw_timing_unavailable_ = false;
+ 
+   ReadbackStagingBuffer resolve_fault_readback_;

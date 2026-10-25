@@ -1,0 +1,1311 @@
+diff --git a/cmake/XeniaHelpers.cmake b/cmake/XeniaHelpers.cmake
+index 1050d2f..10ec969 100644
+--- a/cmake/XeniaHelpers.cmake
++++ b/cmake/XeniaHelpers.cmake
+@@ -126,6 +126,9 @@ function(xe_windowed_app_main target)
+   endif()
+   target_sources(${target} PRIVATE
+     ${PROJECT_SOURCE_DIR}/src/xenia/ui/${_main})
++  if(MINGW)
++    target_link_options(${target} PRIVATE -municode)
++  endif()
+ endfunction()
+ 
+ # xe_embed_binary_assets(target source_dir output_namespace)
+diff --git a/src/xenia/app/CMakeLists.txt b/src/xenia/app/CMakeLists.txt
+index c949b60..2711e63 100644
+--- a/src/xenia/app/CMakeLists.txt
++++ b/src/xenia/app/CMakeLists.txt
+@@ -29,19 +29,28 @@ if(WIN32)
+   )
+   if(XE_TARGET_X86_64)
+     # main_init runs the AVX feature check — it must itself not use AVX.
++    if(MSVC)
++      set(_xe_main_init_isa "/arch:SSE2")
++    else()
++      set(_xe_main_init_isa "-mno-avx;-mno-avx2")
++    endif()
+     set_source_files_properties(
+       ${PROJECT_SOURCE_DIR}/src/xenia/base/main_init_win.cc
+-      PROPERTIES COMPILE_OPTIONS "/arch:SSE2"
++      PROPERTIES COMPILE_OPTIONS "${_xe_main_init_isa}"
+     )
+   endif()
+   # WIN32 executable defaults to /SUBSYSTEM:WINDOWS; override to CONSOLE
+   # in Debug so stdout/stderr reach an attached terminal. Pin the entry
+   # explicitly: wxIMPLEMENT_APP_NO_MAIN only emits wWinMain, so without
+   # /ENTRY the CONSOLE subsystem looks for a missing main().
+-  target_link_options(xenia-app PRIVATE
+-    $<$<CONFIG:Debug>:/SUBSYSTEM:CONSOLE>
+-    /ENTRY:wWinMainCRTStartup
+-  )
++  if(MSVC)
++    target_link_options(xenia-app PRIVATE
++      $<$<CONFIG:Debug>:/SUBSYSTEM:CONSOLE>
++      /ENTRY:wWinMainCRTStartup
++    )
++  elseif(MINGW)
++    target_link_options(xenia-app PRIVATE -municode)
++  endif()
+ elseif(APPLE)
+   target_sources(xenia-app PRIVATE
+     ${PROJECT_SOURCE_DIR}/src/xenia/ui/windowed_app_main_mac.cc
+diff --git a/src/xenia/app/main_resources.rc b/src/xenia/app/main_resources.rc
+index 75fa0e2..e1a2d8f 100644
+--- a/src/xenia/app/main_resources.rc
++++ b/src/xenia/app/main_resources.rc
+@@ -1,6 +1,6 @@
+ //{{NO_DEPENDENCIES}}
+ 
+-MAINICON               ICON                    "..\\..\\..\\assets\\icon\\icon.ico"
++MAINICON               ICON                    "assets/icon/icon.ico"
+ 
+ // wxWidgets resource file (cursors, icons, etc.)
+ #include "wx/msw/wx.rc"
+diff --git a/src/xenia/apu/conversion.h b/src/xenia/apu/conversion.h
+index de23018..d38a699 100644
+--- a/src/xenia/apu/conversion.h
++++ b/src/xenia/apu/conversion.h
+@@ -39,7 +39,7 @@ static void _generic_sequential_6_BE_to_interleaved_6_LE(
+     }
+   }
+ }
+-#if XE_COMPILER_CLANG_CL != 1 && !XE_PLATFORM_LINUX && !XE_PLATFORM_MAC
++#if XE_COMPILER_MSVC && XE_COMPILER_CLANG_CL != 1
+ // load_be_u32 unavailable on clang-cl, clang on Linux, or clang on macOS
+ XE_NOINLINE
+ static void _movbe_sequential_6_BE_to_interleaved_6_LE(
+diff --git a/src/xenia/apu/xaudio2/CMakeLists.txt b/src/xenia/apu/xaudio2/CMakeLists.txt
+index c598ccc..18f5b88 100644
+--- a/src/xenia/apu/xaudio2/CMakeLists.txt
++++ b/src/xenia/apu/xaudio2/CMakeLists.txt
+@@ -2,3 +2,7 @@ add_library(xenia-apu-xaudio2 STATIC)
+ xe_platform_sources(xenia-apu-xaudio2 ${CMAKE_CURRENT_SOURCE_DIR})
+ target_link_libraries(xenia-apu-xaudio2 PUBLIC xenia-base xenia-apu)
+ xe_target_defaults(xenia-apu-xaudio2)
++
++if(MINGW)
++  target_link_libraries(xenia-apu-xaudio2 PUBLIC ksuser)
++endif()
+diff --git a/src/xenia/apu/xaudio2/xaudio2_api.h b/src/xenia/apu/xaudio2/xaudio2_api.h
+index 00c4234..90963bc 100644
+--- a/src/xenia/apu/xaudio2/xaudio2_api.h
++++ b/src/xenia/apu/xaudio2/xaudio2_api.h
+@@ -312,4 +312,10 @@ DECLARE_INTERFACE(IXAudio2VoiceCallback) {
+ }  // namespace apu
+ }  // namespace xe
+ 
++#if defined(__MINGW32__)
++__CRT_UUID_DECL(xe::apu::xaudio2::api::XAudio2_7, 0x5a508685, 0xa254, 0x4fba, 0x9b, 0x82, 0x9a, 0x24, 0xb0, 0x03, 0x06, 0xaf)
++__CRT_UUID_DECL(xe::apu::xaudio2::api::IXAudio2_7, 0x8bcf1f58, 0x9fe7, 0x4583, 0x8a, 0xc6, 0xe2, 0xad, 0xc4, 0x65, 0xc8, 0xbb)
++__CRT_UUID_DECL(xe::apu::xaudio2::api::IXAudio2_8, 0x60d8dac8, 0x5aa1, 0x4e8e, 0xb5, 0x97, 0x2f, 0x5e, 0x28, 0x83, 0xd4, 0x84)
++#endif
++
+ #endif  // XENIA_APU_XAUDIO2_XAUDIO2_API_H_
+diff --git a/src/xenia/base/clock_x64.cc b/src/xenia/base/clock_x64.cc
+index a3f952a..3b72868 100644
+--- a/src/xenia/base/clock_x64.cc
++++ b/src/xenia/base/clock_x64.cc
+@@ -16,7 +16,7 @@
+ 
+ // Wrap all these different cpu compiler intrinsics.
+ // So no inline assembler here and the compiler will remove the clutter.
+-#if XE_COMPILER_MSVC
++#if XE_COMPILER_MSVC || defined(__MINGW32__)
+ #define xe_cpu_cpuid(level, eax, ebx, ecx, edx)              \
+   {                                                          \
+     int __xe_cpuid_registers_[4];                            \
+diff --git a/src/xenia/base/main_init_win.cc b/src/xenia/base/main_init_win.cc
+index cf9d9dc..6ed7ed7 100644
+--- a/src/xenia/base/main_init_win.cc
++++ b/src/xenia/base/main_init_win.cc
+@@ -38,7 +38,12 @@ class StartupCpuFeatureCheck {
+ // where the AVX check then happens in the constructor.
+ //
+ // https://docs.microsoft.com/en-us/cpp/preprocessor/init-seg
++#if defined(__MINGW32__)
++static StartupCpuFeatureCheck gStartupAvxCheck
++    __attribute__((init_priority(101)));
++#else
+ #pragma warning(suppress : 4073)
+ #pragma init_seg(lib)
+ static StartupCpuFeatureCheck gStartupAvxCheck;
++#endif
+ #endif  // XE_ARCH_AMD64
+diff --git a/src/xenia/base/mapped_memory_win.cc b/src/xenia/base/mapped_memory_win.cc
+index 9c1e52b..7a11adf 100644
+--- a/src/xenia/base/mapped_memory_win.cc
++++ b/src/xenia/base/mapped_memory_win.cc
+@@ -26,8 +26,7 @@ namespace xe {
+ class Win32MappedMemory : public MappedMemory {
+  public:
+   // CreateFile returns INVALID_HANDLE_VALUE in case of failure.
+-  // chrispy: made inline const to get around clang error
+-  static inline constexpr HANDLE kFileHandleInvalid = INVALID_HANDLE_VALUE;
++  static inline const HANDLE kFileHandleInvalid = INVALID_HANDLE_VALUE;
+   // CreateFileMapping returns nullptr in case of failure.
+   static constexpr HANDLE kMappingHandleInvalid = nullptr;
+ 
+diff --git a/src/xenia/base/memory.h b/src/xenia/base/memory.h
+index a0dbe2a..194cb96 100644
+--- a/src/xenia/base/memory.h
++++ b/src/xenia/base/memory.h
+@@ -116,7 +116,7 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out);
+ // The memory must be freed with AlignedFree.
+ template <typename T>
+ inline T* AlignedAlloc(size_t alignment) {
+-#if XE_COMPILER_MSVC
++#if XE_PLATFORM_WIN32
+   return reinterpret_cast<T*>(_aligned_malloc(sizeof(T), alignment));
+ #else
+   void* ptr = nullptr;
+@@ -124,17 +124,17 @@ inline T* AlignedAlloc(size_t alignment) {
+     return nullptr;
+   }
+   return reinterpret_cast<T*>(ptr);
+-#endif  // XE_COMPILER_MSVC
++#endif  // XE_PLATFORM_WIN32
+ }
+ 
+ // Frees memory previously allocated with AlignedAlloc.
+ template <typename T>
+ void AlignedFree(T* ptr) {
+-#if XE_COMPILER_MSVC
++#if XE_PLATFORM_WIN32
+   _aligned_free(ptr);
+ #else
+   free(ptr);
+-#endif  // XE_COMPILER_MSVC
++#endif  // XE_PLATFORM_WIN32
+ }
+ 
+ #if XE_PLATFORM_WIN32
+diff --git a/src/xenia/base/socket_win.cc b/src/xenia/base/socket_win.cc
+index e2dd53d..8b2c634 100644
+--- a/src/xenia/base/socket_win.cc
++++ b/src/xenia/base/socket_win.cc
+@@ -15,9 +15,9 @@
+ #include "xenia/base/platform_win.h"
+ 
+ // winsock includes must come after platform_win.h:
+-#include <mstcpip.h>   // NOLINT(build/include_order)
+ #include <winsock2.h>  // NOLINT(build/include_order)
+ #include <ws2tcpip.h>  // NOLINT(build/include_order)
++#include <mstcpip.h>   // NOLINT(build/include_order)
+ 
+ namespace xe {
+ 
+diff --git a/src/xenia/base/string_buffer.cc b/src/xenia/base/string_buffer.cc
+index 8a6ffe9..e385ce7 100644
+--- a/src/xenia/base/string_buffer.cc
++++ b/src/xenia/base/string_buffer.cc
+@@ -10,6 +10,7 @@
+ #include "xenia/base/string_buffer.h"
+ 
+ #include <cstdarg>
++#include <cstdlib>
+ 
+ #include "xenia/base/assert.h"
+ #include "xenia/base/byte_order.h"
+diff --git a/src/xenia/base/threading_win.cc b/src/xenia/base/threading_win.cc
+index a6b9b8d..fb2283b 100644
+--- a/src/xenia/base/threading_win.cc
++++ b/src/xenia/base/threading_win.cc
+@@ -534,10 +534,6 @@ class Win32Thread : public Win32Handle<Thread> {
+   ~Win32Thread() = default;
+ 
+   void set_name(std::string name) override {
+-    // this can actually happen in some debug builds
+-    if (&name == nullptr) {
+-      return;
+-    }
+     xe::threading::set_name(handle_, name);
+     Thread::set_name(name);
+   }
+diff --git a/src/xenia/cpu/backend/x64/x64_code_cache_win.cc b/src/xenia/cpu/backend/x64/x64_code_cache_win.cc
+index feb2743..f4a6544 100644
+--- a/src/xenia/cpu/backend/x64/x64_code_cache_win.cc
++++ b/src/xenia/cpu/backend/x64/x64_code_cache_win.cc
+@@ -20,11 +20,12 @@
+ #include "xenia/base/platform_win.h"
+ #include "xenia/cpu/function.h"
+ 
+-// Function pointer definitions
+-using FnRtlAddGrowableFunctionTable = decltype(&RtlAddGrowableFunctionTable);
+-using FnRtlGrowFunctionTable = decltype(&RtlGrowFunctionTable);
+-using FnRtlDeleteGrowableFunctionTable =
+-    decltype(&RtlDeleteGrowableFunctionTable);
++// Resolve these APIs dynamically, including with SDKs that hide declarations
++// behind a newer _WIN32_WINNT setting.
++using FnRtlAddGrowableFunctionTable = DWORD(NTAPI*)(
++    PVOID*, PRUNTIME_FUNCTION, DWORD, DWORD, ULONG_PTR, ULONG_PTR);
++using FnRtlGrowFunctionTable = VOID(NTAPI*)(PVOID, DWORD);
++using FnRtlDeleteGrowableFunctionTable = VOID(NTAPI*)(PVOID);
+ 
+ namespace xe {
+ namespace cpu {
+diff --git a/src/xenia/cpu/stack_walker_win.cc b/src/xenia/cpu/stack_walker_win.cc
+index 1312048..cf26674 100644
+--- a/src/xenia/cpu/stack_walker_win.cc
++++ b/src/xenia/cpu/stack_walker_win.cc
+@@ -308,8 +308,8 @@ class Win32StackWalker : public StackWalker {
+   }
+ 
+  private:
+-  static PVOID WINAPI XSymFunctionTableAccess64(__in HANDLE hProcess,
+-                                                __in DWORD64 AddrBase) {
++  static PVOID WINAPI XSymFunctionTableAccess64(_In_ HANDLE hProcess,
++                                                _In_ DWORD64 AddrBase) {
+     if (AddrBase >= code_cache_min_ && AddrBase < code_cache_max_) {
+       // Within our generated range so ask code cache.
+       return code_cache_->LookupUnwindInfo(AddrBase);
+diff --git a/src/xenia/gpu/d3d12/CMakeLists.txt b/src/xenia/gpu/d3d12/CMakeLists.txt
+index 3e1c995..5bb8163 100644
+--- a/src/xenia/gpu/d3d12/CMakeLists.txt
++++ b/src/xenia/gpu/d3d12/CMakeLists.txt
+@@ -50,6 +50,12 @@ if(XENIA_BUILD_MISC)
+     ${CMAKE_CURRENT_SOURCE_DIR}/d3d12_trace_dump_main.cc
+     ${PROJECT_SOURCE_DIR}/src/xenia/base/console_app_main_win.cc
+   )
++  # wx window code imports GetWindowSubclass from Common Controls v6.
++  # The console entry point does not get the windowed application's resources.
++  set(_xe_trace_dump_resources "${CMAKE_CURRENT_BINARY_DIR}/trace_dump_resources.rc")
++  file(GENERATE OUTPUT "${_xe_trace_dump_resources}" CONTENT
++    "1 24 \"${PROJECT_SOURCE_DIR}/src/xenia/base/app_win32.manifest\"\n")
++  target_sources(xenia-gpu-d3d12-trace-dump PRIVATE "${_xe_trace_dump_resources}")
+   target_link_libraries(xenia-gpu-d3d12-trace-dump PRIVATE
+     xenia-apu xenia-apu-nop xenia-base xenia-core xenia-cpu
+     xenia-gpu xenia-gpu-d3d12 xenia-hid xenia-hid-nop xenia-hid-portal
+@@ -62,5 +68,8 @@ if(XENIA_BUILD_MISC)
+   if(XE_TARGET_AARCH64)
+     target_link_libraries(xenia-gpu-d3d12-trace-dump PRIVATE xenia-cpu-backend-a64)
+   endif()
++  if(MINGW)
++    target_link_options(xenia-gpu-d3d12-trace-dump PRIVATE -municode)
++  endif()
+   xe_target_defaults(xenia-gpu-d3d12-trace-dump)
+ endif()
+diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+index e35baf1..01f1c5a 100644
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -9,12 +9,14 @@
+ 
+ #include "xenia/gpu/d3d12/d3d12_command_processor.h"
+ 
++#include <algorithm>
+ #include <cstdarg>
+ #include <cstring>
+ 
+ #include "xenia/base/assert.h"
+ #include "xenia/base/byte_order.h"
+ #include "xenia/base/cvar.h"
++#include "xenia/base/clock.h"
+ #include "xenia/base/logging.h"
+ #include "xenia/base/math.h"
+ #include "xenia/base/profiling.h"
+@@ -38,6 +40,15 @@ DEFINE_bool(d3d12_bindless, true,
+             "but may make debugging more complicated.",
+             "D3D12");
+ 
++DEFINE_bool(trace_draw_timing, false,
++            "Record bounded per-draw GPU timestamps for trace replay analysis; "
++            "off during gameplay. Logs at shutdown after GPU completion.",
++            "GPU.Debug");
++
++DEFINE_bool(trace_swap_timing, false,
++            "Log 120-swap host cadence windows for isolated game testing.",
++            "GPU.Debug");
++
+ DECLARE_bool(clear_memory_page_state);
+ DECLARE_bool(d3d12_debug);
+ DECLARE_bool(gpu_debug_markers);
+@@ -1431,7 +1442,7 @@ bool D3D12CommandProcessor::SetupContext() {
+ }
+ 
+ void D3D12CommandProcessor::ShutdownContext() {
+-  AwaitAllQueueOperationsCompletion();
++  DumpTraceDrawTimings(AwaitAllQueueOperationsCompletion());
+ 
+   ResetMemexportPages();
+   memexport_staged_.clear();
+@@ -1996,6 +2007,27 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+                                       uint32_t frontbuffer_height) {
+   SCOPE_profile_cpu_f("gpu");
+   EndZPDFrame();
++  if (cvars::trace_swap_timing) {
++    const uint64_t tick = Clock::QueryHostTickCount();
++    if (trace_swap_last_tick_) {
++      trace_swap_intervals_[trace_swap_count_++] =
++          double(tick - trace_swap_last_tick_) * 1000.0 /
++          double(Clock::QueryHostTickFrequency());
++      if (trace_swap_count_ == trace_swap_intervals_.size()) {
++        auto sorted = trace_swap_intervals_;
++        std::sort(sorted.begin(), sorted.end());
++        double total = 0;
++        for (double ms : sorted) total += ms;
++        const double mean = total / double(sorted.size());
++        XELOGI("TraceSwapCadence frame={} swaps={} fps={:.3f} "
++               "mean_ms={:.3f} p95_ms={:.3f} max_ms={:.3f}",
++               frame_current_, sorted.size(), 1000.0 / mean, mean,
++               sorted[(sorted.size() * 95) / 100], sorted.back());
++        trace_swap_count_ = 0;
++      }
++    }
++    trace_swap_last_tick_ = tick;
++  }
+ 
+   // Before the presenter check, so the paths that return early end the frame
+   // too.
+@@ -2568,6 +2600,89 @@ void D3D12CommandProcessor::DestroyResolveFaultCopy() {
+   resolve_fault_fence_value_ = 0;
+ }
+ 
++uint32_t D3D12CommandProcessor::BeginTraceDrawTiming(
++    uint64_t vs, uint64_t ps, uint32_t vertices, uint32_t surface) {
++  if (!cvars::trace_draw_timing || trace_draw_timing_unavailable_ ||
++      trace_draw_timings_.size() >= kTraceDrawTimingCapacity) {
++    return UINT32_MAX;
++  }
++  if (!trace_draw_timing_heap_) {
++    D3D12_QUERY_HEAP_DESC desc = {};
++    desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
++    desc.Count = kTraceDrawTimingCapacity * 2;
++    if (FAILED(GetD3D12Provider().GetDevice()->CreateQueryHeap(
++            &desc, IID_PPV_ARGS(&trace_draw_timing_heap_))) ||
++        FAILED(GetD3D12Provider().GetDirectQueue()->GetTimestampFrequency(
++            &trace_draw_timing_frequency_)) ||
++        !trace_draw_timing_frequency_ ||
++        !CreateReadbackStagingBuffer(trace_draw_timing_readback_,
++                                    kTraceDrawTimingCapacity * 16)) {
++      trace_draw_timing_unavailable_ = true;
++      XELOGW("Trace GPU timestamps unavailable; no timing recorded");
++      return UINT32_MAX;
++    }
++    trace_draw_timings_.reserve(kTraceDrawTimingCapacity);
++  }
++  uint32_t slot = uint32_t(trace_draw_timings_.size());
++  trace_draw_timings_.push_back({frame_current_, vs, ps, vertices, surface});
++  deferred_command_list_.D3DEndQuery(trace_draw_timing_heap_.Get(),
++                                    D3D12_QUERY_TYPE_TIMESTAMP, slot * 2);
++  return slot;
++}
++
++void D3D12CommandProcessor::EndTraceDrawTiming(uint32_t slot) {
++  if (slot == UINT32_MAX) {
++    return;
++  }
++  deferred_command_list_.D3DEndQuery(trace_draw_timing_heap_.Get(),
++                                    D3D12_QUERY_TYPE_TIMESTAMP, slot * 2 + 1);
++}
++
++void D3D12CommandProcessor::ResolveTraceDrawTimings() {
++  uint32_t end = uint32_t(trace_draw_timings_.size());
++  if (!trace_draw_timing_heap_ || end == trace_draw_timing_resolved_) {
++    return;
++  }
++  deferred_command_list_.D3DResolveQueryData(
++      trace_draw_timing_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
++      trace_draw_timing_resolved_ * 2,
++      (end - trace_draw_timing_resolved_) * 2,
++      trace_draw_timing_readback_.resource.Get(),
++      uint64_t(trace_draw_timing_resolved_) * 16);
++  trace_draw_timing_resolved_ = end;
++}
++
++void D3D12CommandProcessor::DumpTraceDrawTimings(bool gpu_complete) {
++  // ShutdownContext has already awaited GPU completion. This does not add
++  // per-draw CPU/GPU waits and cannot change guest visibility results.
++  if (gpu_complete && trace_draw_timing_readback_.mapped &&
++      trace_draw_timing_frequency_) {
++    const auto* values =
++        static_cast<const uint64_t*>(trace_draw_timing_readback_.mapped);
++    double sum_us = 0;
++    for (uint32_t i = 0; i < trace_draw_timing_resolved_; ++i) {
++      if (values[i * 2 + 1] < values[i * 2]) {
++        continue;
++      }
++      double us = double(values[i * 2 + 1] - values[i * 2]) * 1000000.0 /
++                  double(trace_draw_timing_frequency_);
++      const auto& row = trace_draw_timings_[i];
++      sum_us += us;
++      XELOGI("TraceDrawGPU index={} frame={} vs={:016X} ps={:016X} "
++             "vertices={} surface={:08X} us={:.3f}",
++             i, row.frame, row.vertex_shader, row.pixel_shader,
++             row.vertices, row.surface, us);
++    }
++    XELOGI("TraceDrawGPU total_draws={} sum_draw_us={:.3f} "
++           "(draw spans only; excludes copies/barriers/CPU waits; timing adds overhead)",
++           trace_draw_timing_resolved_, sum_us);
++  }
++  DestroyReadbackStagingBuffer(trace_draw_timing_readback_);
++  trace_draw_timing_heap_.Reset();
++  trace_draw_timings_.clear();
++  trace_draw_timing_resolved_ = 0;
++}
++
+ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+                                       uint32_t index_count,
+                                       IndexBufferInfo* index_buffer_info,
+@@ -3201,8 +3316,14 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+       deferred_command_list_.D3DSetPredication(
+           predicate_buffer, predicate_offset, D3D12_PREDICATION_OP_EQUAL_ZERO);
+     }
++    const uint32_t trace_timing_slot = BeginTraceDrawTiming(
++        vertex_shader->ucode_data_hash(),
++        pixel_shader ? pixel_shader->ucode_data_hash() : 0,
++        primitive_processing_result.host_draw_vertex_count,
++        regs.Get<reg::RB_SURFACE_INFO>().value);
+     deferred_command_list_.D3DDrawInstanced(
+         primitive_processing_result.host_draw_vertex_count, 1, 0, 0);
++    EndTraceDrawTiming(trace_timing_slot);
+     if (predicate_buffer) {
+       deferred_command_list_.D3DSetPredication(nullptr, 0,
+                                                D3D12_PREDICATION_OP_EQUAL_ZERO);
+@@ -3280,8 +3401,14 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
+       deferred_command_list_.D3DSetPredication(
+           predicate_buffer, predicate_offset, D3D12_PREDICATION_OP_EQUAL_ZERO);
+     }
++    const uint32_t trace_timing_slot = BeginTraceDrawTiming(
++        vertex_shader->ucode_data_hash(),
++        pixel_shader ? pixel_shader->ucode_data_hash() : 0,
++        primitive_processing_result.host_draw_vertex_count,
++        regs.Get<reg::RB_SURFACE_INFO>().value);
+     deferred_command_list_.D3DDrawIndexedInstanced(
+         primitive_processing_result.host_draw_vertex_count, 1, 0, 0, 0);
++    EndTraceDrawTiming(trace_timing_slot);
+     if (predicate_buffer) {
+       deferred_command_list_.D3DSetPredication(nullptr, 0,
+                                                D3D12_PREDICATION_OP_EQUAL_ZERO);
+@@ -4005,6 +4132,7 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+         deferred_command_list_, GetCurrentSubmission(), submission_open_);
+ 
+     pipeline_cache_->EndSubmission();
++    ResolveTraceDrawTimings();
+ 
+     // Submit barriers now because resources with the queued barriers may be
+     // destroyed between frames.
+diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+index 4dfa637..e0ac719 100644
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -413,6 +413,28 @@ class D3D12CommandProcessor final : public CommandProcessor {
+   void DestroyReadbackStagingBuffer(ReadbackStagingBuffer& buffer);
+   // Where a fault copy lands without the guest RAM host buffer. Idle between
+   // fault copies, each of which is awaited.
++  // Optional replay-only per-draw GPU timestamps. No rendering state changes.
++  uint64_t trace_swap_last_tick_ = 0;
++  std::array<double, 120> trace_swap_intervals_ = {};
++  size_t trace_swap_count_ = 0;
++
++  static constexpr uint32_t kTraceDrawTimingCapacity = 16384;
++  struct TraceDrawTiming {
++    uint64_t frame, vertex_shader, pixel_shader;
++    uint32_t vertices, surface;
++  };
++  uint32_t BeginTraceDrawTiming(uint64_t vs, uint64_t ps, uint32_t vertices,
++                                uint32_t surface);
++  void EndTraceDrawTiming(uint32_t slot);
++  void ResolveTraceDrawTimings();
++  void DumpTraceDrawTimings(bool gpu_complete);
++  Microsoft::WRL::ComPtr<ID3D12QueryHeap> trace_draw_timing_heap_;
++  ReadbackStagingBuffer trace_draw_timing_readback_;
++  std::vector<TraceDrawTiming> trace_draw_timings_;
++  uint64_t trace_draw_timing_frequency_ = 0;
++  uint32_t trace_draw_timing_resolved_ = 0;
++  bool trace_draw_timing_unavailable_ = false;
++
+   ReadbackStagingBuffer resolve_fault_readback_;
+   uint32_t resolve_fault_readback_size_ = 0;
+   void PrepareReadbackStagingEviction() {}
+diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+index 48e7c38..f413148 100644
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -1427,8 +1427,14 @@ D3D12TextureCache::D3D12Texture::D3D12Texture(
+   ID3D12Device* device =
+       texture_cache.command_processor_.GetD3D12Provider().GetDevice();
+   D3D12_RESOURCE_DESC resource_desc = resource_->GetDesc();
++#if defined(__MINGW32__)
++  D3D12_RESOURCE_ALLOCATION_INFO allocation_info;
++  device->GetResourceAllocationInfo(&allocation_info, 0, 1, &resource_desc);
++  SetHostMemoryUsage(allocation_info.SizeInBytes);
++#else
+   SetHostMemoryUsage(
+       device->GetResourceAllocationInfo(0, 1, &resource_desc).SizeInBytes);
++#endif
+ }
+ 
+ D3D12TextureCache::D3D12Texture::~D3D12Texture() {
+diff --git a/src/xenia/gpu/draw_util.cc b/src/xenia/gpu/draw_util.cc
+index 9c93ee3..9fdcc17 100644
+--- a/src/xenia/gpu/draw_util.cc
++++ b/src/xenia/gpu/draw_util.cc
+@@ -775,7 +775,7 @@ static inline void GetScissorTmpl(const RegisterFile& XE_RESTRICT regs,
+       pa_sc_screen_scissor_tl_tl_x, pa_sc_screen_scissor_tl_tl_y,
+       pa_sc_screen_scissor_br_br_x, pa_sc_screen_scissor_br_br_y);
+ #if XE_PLATFORM_WIN32
+-  __m128i xyoffsetadd = _mm_cvtsi64x_si128(
++  __m128i xyoffsetadd = _mm_cvtsi64_si128(
+       static_cast<unsigned long long>(pa_sc_window_offset_window_x_offset) |
+       (static_cast<unsigned long long>(pa_sc_window_offset_window_y_offset)
+        << 32));
+diff --git a/src/xenia/gpu/shared_memory.cc b/src/xenia/gpu/shared_memory.cc
+index 6aaeb76..f8d3bbc 100644
+--- a/src/xenia/gpu/shared_memory.cc
++++ b/src/xenia/gpu/shared_memory.cc
+@@ -13,6 +13,7 @@
+ #include "xenia/base/bit_range.h"
+ #include "xenia/base/logging.h"
+ #include "xenia/base/profiling.h"
++#include "xenia/gpu/trace_writer.h"
+ 
+ namespace xe {
+ namespace gpu {
+@@ -497,6 +498,35 @@ bool SharedMemory::RequestRange(uint32_t start, uint32_t length) {
+   return UploadRanges(uploads, current_upload_range);
+ }
+ 
++void SharedMemory::RecordCpuMemoryReadInTrace(TraceWriter& trace_writer,
++                                              uint32_t start, uint32_t length) {
++  if (!trace_writer.is_open() || !length || start >= kBufferSize) {
++    return;
++  }
++  const uint32_t end = start + std::min(length, kBufferSize - start);
++  auto global_lock = global_critical_region_.Acquire();
++  uint32_t cpu_run_start = UINT32_MAX;
++  for (uint32_t address = start; address < end;) {
++    const uint32_t page = address >> page_size_log2_;
++    const bool gpu_written =
++        (system_page_flags_valid_and_gpu_written_[page >> 6] &
++         (UINT64_C(1) << (page & 63))) != 0;
++    if (gpu_written) {
++      if (cpu_run_start != UINT32_MAX) {
++        trace_writer.WriteMemoryReadCached(cpu_run_start,
++                                            address - cpu_run_start);
++        cpu_run_start = UINT32_MAX;
++      }
++    } else if (cpu_run_start == UINT32_MAX) {
++      cpu_run_start = address;
++    }
++    address = std::min(end, (page + 1) << page_size_log2_);
++  }
++  if (cpu_run_start != UINT32_MAX) {
++    trace_writer.WriteMemoryReadCached(cpu_run_start, end - cpu_run_start);
++  }
++}
++
+ bool SharedMemory::IsRangeValid(uint32_t start, uint32_t length) const {
+   if (!length) {
+     return true;
+diff --git a/src/xenia/gpu/shared_memory.h b/src/xenia/gpu/shared_memory.h
+index 2fd3a0c..66ab2a7 100644
+--- a/src/xenia/gpu/shared_memory.h
++++ b/src/xenia/gpu/shared_memory.h
+@@ -15,6 +15,8 @@
+ namespace xe {
+ namespace gpu {
+ 
++class TraceWriter;
++
+ // Manages memory for unconverted textures, resolve targets, vertex and index
+ // buffers that can be accessed from shaders with Xenon physical addresses, with
+ // system page size granularity.
+@@ -79,6 +81,12 @@ class SharedMemory {
+   // transitions such as watch installation.
+   bool IsRangeValid(uint32_t start, uint32_t length) const;
+ 
++  // Record only CPU-authoritative parts of a texture in an active trace.
++  // GPU-written pages are captured at trace initialization or regenerated by
++  // earlier packets; reading their stale CPU backing would overwrite them.
++  void RecordCpuMemoryReadInTrace(TraceWriter& trace_writer, uint32_t start,
++                                  uint32_t length);
++
+   void TryFindUploadRange(const uint32_t& block_first,
+                           const uint32_t& block_last,
+                           const uint32_t& page_first, const uint32_t& page_last,
+diff --git a/src/xenia/gpu/spirv_to_dxil_compiler.cc b/src/xenia/gpu/spirv_to_dxil_compiler.cc
+index 1ad8de6..cf72047 100644
+--- a/src/xenia/gpu/spirv_to_dxil_compiler.cc
++++ b/src/xenia/gpu/spirv_to_dxil_compiler.cc
+@@ -32,6 +32,12 @@
+ #include <mutex>
+ 
+ #include "third_party/DirectXShaderCompiler/include/dxc/dxcapi.h"
++#if defined(__MINGW32__)
++__CRT_UUID_DECL(IDxcValidator, 0xa6e82bd2, 0x1fd7, 0x4826, 0x98, 0x11,
++                0x28, 0x57, 0xe7, 0x97, 0xf4, 0x9a)
++__CRT_UUID_DECL(IDxcVersionInfo, 0xb04f5b50, 0x2059, 0x4f12, 0xa8, 0xff,
++                0xa1, 0xe0, 0xcd, 0xe1, 0xcc, 0x7e)
++#endif
+ #include "xenia/base/filesystem.h"
+ #endif
+ 
+diff --git a/src/xenia/gpu/texture_cache.cc b/src/xenia/gpu/texture_cache.cc
+index c6a2f08..0b91ff8 100644
+--- a/src/xenia/gpu/texture_cache.cc
++++ b/src/xenia/gpu/texture_cache.cc
+@@ -533,7 +533,8 @@ void TextureCache::RecordUsedTexturesInTrace(uint32_t used_texture_mask) {
+   }
+   // Only ranges the shared memory actually uploads are recorded, so a texture
+   // still resident from an earlier frame would never reach the trace. The
+-  // writer drops ranges it has already written.
++  // writer drops ranges it has already written. Shared memory excludes GPU-
++  // authoritative pages so stale CPU bytes cannot replace resolved textures.
+   uint32_t textures_remaining = used_texture_mask;
+   uint32_t index = 0;
+   while (xe::bit_scan_forward(textures_remaining, &index)) {
+@@ -548,13 +549,13 @@ void TextureCache::RecordUsedTexturesInTrace(uint32_t used_texture_mask) {
+       continue;
+     }
+     if (binding.key.base_page) {
+-      trace_writer_->WriteMemoryReadCached(
+-          binding.key.base_page << 12,
++      shared_memory_.RecordCpuMemoryReadInTrace(
++          *trace_writer_, binding.key.base_page << 12,
+           xe::align(texture->GetGuestBaseSize(), UINT32_C(16)));
+     }
+     if (binding.key.mip_page) {
+-      trace_writer_->WriteMemoryReadCached(
+-          binding.key.mip_page << 12,
++      shared_memory_.RecordCpuMemoryReadInTrace(
++          *trace_writer_, binding.key.mip_page << 12,
+           xe::align(texture->GetGuestMipsSize(), UINT32_C(16)));
+     }
+   }
+diff --git a/src/xenia/gpu/trace_dump.cc b/src/xenia/gpu/trace_dump.cc
+index 04cbf22..85ede30 100644
+--- a/src/xenia/gpu/trace_dump.cc
++++ b/src/xenia/gpu/trace_dump.cc
+@@ -9,6 +9,8 @@
+ 
+ #include "xenia/gpu/trace_dump.h"
+ 
++#include "xenia/config.h"
++
+ #include <cstdio>
+ 
+ #include "third_party/stb/stb_image_write.h"
+@@ -19,6 +21,7 @@
+ #include "xenia/base/threading.h"
+ #include "xenia/gpu/command_processor.h"
+ #include "xenia/gpu/graphics_system.h"
++#include "xenia/gpu/gpu_flags.h"
+ #include "xenia/memory.h"
+ #include "xenia/ui/file_picker.h"
+ #include "xenia/ui/presenter.h"
+@@ -91,6 +94,11 @@ DEFINE_bool(trace_dump_memory_series, false,
+             "trace_dump_interval.",
+             "GPU.Debug");
+ 
++DEFINE_uint32(trace_dump_repeat_count, 0,
++              "Repeat a captured trace with warm pipelines (maximum 16). "
++              "GPU timestamps exclude restoration and are not game FPS.",
++              "GPU.Debug");
++
+ namespace xe {
+ namespace gpu {
+ 
+@@ -153,6 +161,8 @@ int TraceDump::Main(const std::vector<std::string>& args) {
+ }
+ 
+ bool TraceDump::Setup() {
++  // Honor the explicit diagnostic config without creating or saving defaults.
++  config::SetupConfig({});
+   // Create the emulator but don't initialize so we can setup the window.
+   emulator_ = std::make_unique<Emulator>("", "", "", "");
+   X_STATUS result = emulator_->Setup(
+@@ -206,6 +216,33 @@ bool TraceDump::CaptureToPng(const std::filesystem::path& png_path) {
+ }
+ 
+ int TraceDump::Run() {
++  if (cvars::trace_dump_repeat_count) {
++    // Stand-in shaders would make a missing draw appear to be a speedup.
++    if (cvars::trace_dump_repeat_count > 16 || cvars::async_shader_compilation || !player_->frame_count()) {
++      XELOGE("Trace repetition requires a nonempty trace and "
++             "async_shader_compilation=false");
++      return 1;
++    }
++    XELOGI("Trace repeat: {} complete passes, {} captured frames per pass. "
++           "Only GPU timestamps measure GPU work, not replay wall time.",
++           cvars::trace_dump_repeat_count, player_->frame_count());
++    for (uint32_t pass = 0; pass < cvars::trace_dump_repeat_count; ++pass) {
++      for (size_t frame = 0; frame < player_->frame_count(); ++frame) {
++        player_->ReplayFrame(int(frame));
++        player_->WaitOnPlayback();
++      }
++    }
++    // No CPU game, input, save changes, per-pass screenshots or host captures.
++    // Initial snapshots are replayed on each pass; pipeline caches stay warm.
++    int result =
++        CaptureToPng(base_output_path_.replace_extension(".png")) ? 0 : 1;
++    XELOGI("Trace repeat complete: {} passes; final image {}",
++           cvars::trace_dump_repeat_count, result ? "failed" : "written");
++    player_.reset();
++    emulator_.reset();
++    return result;
++  }
++
+   int capture_frame = cvars::trace_dump_capture_frame;
+   if (capture_frame < 0) {
+     BeginHostCapture();
+diff --git a/src/xenia/gpu/trace_player.cc b/src/xenia/gpu/trace_player.cc
+index ec17206..e0d68dd 100644
+--- a/src/xenia/gpu/trace_player.cc
++++ b/src/xenia/gpu/trace_player.cc
+@@ -9,12 +9,16 @@
+ 
+ #include "xenia/gpu/trace_player.h"
+ 
++#include "xenia/base/logging.h"
+ #include "xenia/gpu/command_processor.h"
++#include "xenia/gpu/packet_disassembler.h"
+ #include "xenia/gpu/graphics_system.h"
+ #include "xenia/gpu/registers.h"
+ #include "xenia/gpu/xenos.h"
+ #include "xenia/memory.h"
+ 
++DECLARE_bool(log_draws);
++
+ namespace xe {
+ namespace gpu {
+ 
+@@ -41,6 +45,17 @@ const TraceReader::Frame* TracePlayer::current_frame() const {
+   return frame(current_frame_index_);
+ }
+ 
++void TracePlayer::ReplayFrame(int target_frame) {
++  assert_false(is_playing_trace());
++  assert_true(target_frame >= 0 && size_t(target_frame) < frame_count());
++  current_frame_index_ = target_frame;
++  const auto* captured_frame = frame(target_frame);
++  current_command_index_ = int(captured_frame->commands.size()) - 1;
++  PlayTrace(captured_frame->start_ptr,
++            captured_frame->end_ptr - captured_frame->start_ptr,
++            TracePlaybackMode::kUntilEnd, false);
++}
++
+ void TracePlayer::SeekFrame(int target_frame) {
+   if (current_frame_index_ == target_frame) {
+     return;
+@@ -120,6 +135,7 @@ void TracePlayer::PlayTraceOnThread(const uint8_t* trace_data,
+   auto trace_ptr = trace_data;
+   bool pending_break = false;
+   const PacketStartCommand* pending_packet = nullptr;
++  uint32_t draw_command_index = 0;
+   while (trace_ptr < trace_data + trace_size) {
+     playback_percent_ = uint32_t(
+         (float(trace_ptr - trace_data) / float(trace_end - trace_data)) *
+@@ -166,6 +182,17 @@ void TracePlayer::PlayTraceOnThread(const uint8_t* trace_data,
+         auto cmd = reinterpret_cast<const PacketEndCommand*>(trace_ptr);
+         trace_ptr += sizeof(*cmd);
+         if (pending_packet) {
++          const auto category = PacketDisassembler::GetPacketCategory(
++              reinterpret_cast<const uint8_t*>(pending_packet) +
++              sizeof(PacketStartCommand));
++          if (category == PacketCategory::kDraw ||
++              category == PacketCategory::kSwap) {
++            if (cvars::log_draws) {
++              XELOGI("replay command {} (frame {})", draw_command_index,
++                     current_frame_index_);
++            }
++            ++draw_command_index;
++          }
+           command_processor->ExecutePacket(pending_packet->base_ptr,
+                                            pending_packet->count);
+           pending_packet = nullptr;
+diff --git a/src/xenia/gpu/trace_player.h b/src/xenia/gpu/trace_player.h
+index abad020..e385a7c 100644
+--- a/src/xenia/gpu/trace_player.h
++++ b/src/xenia/gpu/trace_player.h
+@@ -41,6 +41,9 @@ class TracePlayer : public TraceReader {
+   // Scalar from 0-10000
+   uint32_t playback_percent() const { return playback_percent_; }
+ 
++  // Replays the complete captured frame, including its initial register,
++  // memory and EDRAM snapshots, without discarding compiled pipelines.
++  void ReplayFrame(int target_frame);
+   void SeekFrame(int target_frame);
+   void SeekCommand(int target_command);
+   // Plays a frame up to one command, continuing from the previous frame.
+@@ -57,7 +60,7 @@ class TracePlayer : public TraceReader {
+   GraphicsSystem* graphics_system_;
+   int current_frame_index_;
+   int current_command_index_;
+-  bool playing_trace_ = false;
++  std::atomic<bool> playing_trace_ = {false};
+   std::atomic<uint32_t> playback_percent_ = {0};
+   std::unique_ptr<xe::threading::Event> playback_event_;
+ };
+diff --git a/src/xenia/kernel/xam/xdbf/spa_info.cc b/src/xenia/kernel/xam/xdbf/spa_info.cc
+index dbf41b1..3cf3fa4 100644
+--- a/src/xenia/kernel/xam/xdbf/spa_info.cc
++++ b/src/xenia/kernel/xam/xdbf/spa_info.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "xenia/kernel/xam/xdbf/spa_info.h"
+ 
++#include <algorithm>
+ #include <tuple>
+ 
+ namespace xe {
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
+index 7e79190..cd4907d 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
+@@ -72,14 +72,14 @@ static bool CompletesAsync(XFile* file, uint64_t byte_offset, XThread* thread,
+ 
+ struct CreateOptions {
+   // https://processhacker.sourceforge.io/doc/ntioapi_8h.html
+-  static constexpr uint32_t FILE_DIRECTORY_FILE = 0x00000001;
++  static constexpr uint32_t kDirectoryFile = 0x00000001;
+   // Optimization - files access will be sequential, not random.
+-  static constexpr uint32_t FILE_SEQUENTIAL_ONLY = 0x00000004;
+-  static constexpr uint32_t FILE_SYNCHRONOUS_IO_ALERT = 0x00000010;
+-  static constexpr uint32_t FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020;
+-  static constexpr uint32_t FILE_NON_DIRECTORY_FILE = 0x00000040;
++  static constexpr uint32_t kSequentialOnly = 0x00000004;
++  static constexpr uint32_t kSynchronousIoAlert = 0x00000010;
++  static constexpr uint32_t kSynchronousIoNonalert = 0x00000020;
++  static constexpr uint32_t kNonDirectoryFile = 0x00000040;
+   // Optimization - file access will be random, not sequential.
+-  static constexpr uint32_t FILE_RANDOM_ACCESS = 0x00000800;
++  static constexpr uint32_t kRandomAccess = 0x00000800;
+ };
+ 
+ // XeFu, the original Xbox emulator, opens the running Xbox title's data
+@@ -213,8 +213,8 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
+             root_entry, target_path,
+             vfs::FileDisposition((uint32_t)creation_disposition),
+             desired_access,
+-            (create_options & CreateOptions::FILE_DIRECTORY_FILE) != 0,
+-            (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) != 0,
++            (create_options & CreateOptions::kDirectoryFile) != 0,
++            (create_options & CreateOptions::kNonDirectoryFile) != 0,
+             &vfs_file, &file_action);
+       },
+       GuestScheduler::BlockingCallClass::kConcurrent);
+@@ -224,10 +224,10 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
+   if (XSUCCEEDED(result)) {
+     // If true, desired_access SYNCHRONIZE flag must be set.
+     bool alertable =
+-        (create_options & CreateOptions::FILE_SYNCHRONOUS_IO_ALERT) != 0;
++        (create_options & CreateOptions::kSynchronousIoAlert) != 0;
+     bool synchronous =
+         alertable ||
+-        (create_options & CreateOptions::FILE_SYNCHRONOUS_IO_NONALERT);
++        (create_options & CreateOptions::kSynchronousIoNonalert);
+     file = object_ref<XFile>(
+         new XFile(kernel_state(), vfs_file, synchronous, alertable));
+ 
+diff --git a/src/xenia/ui/d3d12/CMakeLists.txt b/src/xenia/ui/d3d12/CMakeLists.txt
+index 3731a61..da4dbe3 100644
+--- a/src/xenia/ui/d3d12/CMakeLists.txt
++++ b/src/xenia/ui/d3d12/CMakeLists.txt
+@@ -25,3 +25,7 @@ if(XENIA_BUILD_MISC)
+   endif()
+   xe_target_defaults(xenia-ui-window-d3d12-demo)
+ endif()
++
++if(MINGW)
++  target_link_libraries(xenia-ui-d3d12 PUBLIC dxguid)
++endif()
+diff --git a/src/xenia/ui/d3d12/d3d12_api.h b/src/xenia/ui/d3d12/d3d12_api.h
+index cc03df7..37ef99b 100644
+--- a/src/xenia/ui/d3d12/d3d12_api.h
++++ b/src/xenia/ui/d3d12/d3d12_api.h
+@@ -22,12 +22,27 @@
+ #include "third_party/DirectX-Headers/include/directx/d3d12.h"
+ #include "third_party/DirectX-Headers/include/directx/d3d12sdklayers.h"
+ 
++#if defined(__MINGW32__)
++// MinGW does not ship DXProgrammableCapture.h. Match the Windows SDK interface.
++MIDL_INTERFACE("9f251514-9d4d-4902-9d60-18988ab7d4b5")
++IDXGraphicsAnalysis : public IUnknown {
++  virtual void STDMETHODCALLTYPE BeginCapture() = 0;
++  virtual void STDMETHODCALLTYPE EndCapture() = 0;
++};
++__CRT_UUID_DECL(IDXGraphicsAnalysis, 0x9f251514, 0x9d4d, 0x4902, 0x9d, 0x60,
++                0x18, 0x98, 0x8a, 0xb7, 0xd4, 0xb5)
++#else
+ #include <DXProgrammableCapture.h>
++#endif
+ #include <dxgi1_6.h>
+ #include <dxgidebug.h>
+ // For Microsoft::WRL::ComPtr.
+ #include <wrl/client.h>
+ 
++#if defined(__MINGW32__)
++#include "xenia/ui/d3d12/d3d12_mingw_uuid.h"
++#endif
++
+ #define XELOGD3D XELOGI
+ 
+ #endif  // XENIA_UI_D3D12_D3D12_API_H_
+diff --git a/src/xenia/ui/d3d12/d3d12_provider.cc b/src/xenia/ui/d3d12/d3d12_provider.cc
+index eda8086..aae9e0a 100644
+--- a/src/xenia/ui/d3d12/d3d12_provider.cc
++++ b/src/xenia/ui/d3d12/d3d12_provider.cc
+@@ -393,7 +393,7 @@ bool D3D12Provider::Initialize() {
+     DXGI_ADAPTER_DESC1 adapter_desc;
+     if (SUCCEEDED(adapter->GetDesc1(&adapter_desc))) {
+       if (SUCCEEDED(pfn_d3d12_create_device_(adapter, D3D_FEATURE_LEVEL_11_0,
+-                                             _uuidof(ID3D12Device), nullptr))) {
++                                             __uuidof(ID3D12Device), nullptr))) {
+         if (cvars::d3d12_adapter >= 0) {
+           if (adapter_index == cvars::d3d12_adapter) {
+             break;
+diff --git a/src/xenia/ui/game_info_panel_wx.cc b/src/xenia/ui/game_info_panel_wx.cc
+index 583e736..b3e8f7d 100644
+--- a/src/xenia/ui/game_info_panel_wx.cc
++++ b/src/xenia/ui/game_info_panel_wx.cc
+@@ -61,6 +61,11 @@
+ #include "xenia/ui/patches_panel_wx.h"
+ #include "xenia/vfs/devices/xcontent_container_device.h"
+ 
++// Avoid the Win32 API macro colliding with wxDC::GetCharWidth.
++#ifdef GetCharWidth
++#undef GetCharWidth
++#endif
++
+ namespace xe {
+ namespace app {
+ 
+diff --git a/src/xenia/ui/game_list_panel_wx.cc b/src/xenia/ui/game_list_panel_wx.cc
+index f6cbed5..4d68e4c 100644
+--- a/src/xenia/ui/game_list_panel_wx.cc
++++ b/src/xenia/ui/game_list_panel_wx.cc
+@@ -44,6 +44,11 @@
+ #include "xenia/ui/compat_display_wx.h"
+ #include "xenia/ui/icon_decode.h"
+ 
++// Avoid the Win32 API macro colliding with wxDC::GetCharWidth.
++#ifdef GetCharWidth
++#undef GetCharWidth
++#endif
++
+ namespace xe {
+ namespace app {
+ 
+diff --git a/src/xenia/ui/imgui_drawer.cc b/src/xenia/ui/imgui_drawer.cc
+index 23fa672..1c721a8 100644
+--- a/src/xenia/ui/imgui_drawer.cc
++++ b/src/xenia/ui/imgui_drawer.cc
+@@ -29,7 +29,7 @@
+ #include "third_party/stb/stb_image.h"
+ 
+ #if XE_PLATFORM_WIN32
+-#include <ShlObj_core.h>
++#include <shlobj.h>
+ #endif
+ 
+ #if XE_PLATFORM_LINUX
+diff --git a/src/xenia/ui/redist_installer_wx.cc b/src/xenia/ui/redist_installer_wx.cc
+index 8dc0a51..ed49f4f 100644
+--- a/src/xenia/ui/redist_installer_wx.cc
++++ b/src/xenia/ui/redist_installer_wx.cc
+@@ -165,7 +165,11 @@ constexpr wchar_t kVCRuntimeRegKey[] =
+ // when a newer vc_redist ships. Compare Major.Minor only; servicing builds
+ // within a minor add no exports.
+ constexpr DWORD kVCRuntimeMinMajor = 14;
++#ifdef _MSC_VER
+ constexpr DWORD kVCRuntimeBuiltMinor = DWORD(_MSC_VER - 1900);
++#else
++constexpr DWORD kVCRuntimeBuiltMinor = 0;
++#endif
+ constexpr DWORD kVCRuntimeLatestMinor = 44;  // 14.44.x, newest public vc_redist
+ constexpr DWORD kVCRuntimeMinMinor =
+     kVCRuntimeBuiltMinor < kVCRuntimeLatestMinor ? kVCRuntimeBuiltMinor
+@@ -759,6 +763,10 @@ bool EnsureVulkanLoader(const std::filesystem::path& vulkan_dir) {
+ #endif
+ 
+ bool EnsureVCRuntime() {
++#if defined(__MINGW32__)
++  // MinGW uses its own C++ runtime, not the MSVC redistributable.
++  return true;
++#endif
+   VCRuntimeStatus status = QueryVCRuntime();
+   if (status.up_to_date) {
+     return true;
+diff --git a/src/xenia/ui/windowed_app_main_win.cc b/src/xenia/ui/windowed_app_main_win.cc
+index 2f4c29c..054dc3b 100644
+--- a/src/xenia/ui/windowed_app_main_win.cc
++++ b/src/xenia/ui/windowed_app_main_win.cc
+@@ -44,7 +44,7 @@ static HMODULE probe_for_module(void* addr) {
+   // break if access violation thrown, we're definitely not a PE in that case
+   __try {
+     for (unsigned i = 0; i < max_search_iters; ++i) {
+-      if (*reinterpret_cast<unsigned short*>(base) == 'ZM') {
++      if (*reinterpret_cast<unsigned short*>(base) == 0x5A4D) {
+         return reinterpret_cast<HMODULE>(base);
+       } else {
+         base -= 65536;
+diff --git a/src/xenia/vfs/entry.cc b/src/xenia/vfs/entry.cc
+index 87ff36a..3334399 100644
+--- a/src/xenia/vfs/entry.cc
++++ b/src/xenia/vfs/entry.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "xenia/vfs/entry.h"
+ 
++#include <algorithm>
+ #include <utility>
+ 
+ #include "xenia/base/filesystem.h"
+diff --git a/third_party/CMakeLists.txt b/third_party/CMakeLists.txt
+index 88a937a..d0036a4 100644
+--- a/third_party/CMakeLists.txt
++++ b/third_party/CMakeLists.txt
+@@ -35,6 +35,9 @@ target_include_directories(asio INTERFACE asio/include)
+ target_compile_definitions(asio INTERFACE
+   ASIO_STANDALONE
+   ASIO_NO_DEPRECATED
++  # MinGW may define _MT only after other headers, so inference is order-dependent.
++  # Xenia uses a shared io_context on a worker thread in every build.
++  ASIO_HAS_THREADS=1
+ )
+ if(WIN32)
+   target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0A00)
+@@ -179,7 +182,11 @@ target_include_directories(glslang-spirv PUBLIC glslang)
+ # the x64 host, so reuse the binary from a previous native build instead
+ # (Windows-on-ARM runs x64 fine via Prism, and macOS handles its own
+ # x86_64↔arm64 via Rosetta — both directions are unaffected).
++set(XENIA_HOST_SHADER_CC "" CACHE FILEPATH "Native shader compiler for cross builds")
+ set(_xe_use_host_shader_cc FALSE)
++if(XENIA_HOST_SHADER_CC)
++  set(_xe_use_host_shader_cc TRUE)
++endif()
+ if(WIN32 AND CMAKE_CROSSCOMPILING AND XE_TARGET_AARCH64
+     AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+   set(_xe_use_host_shader_cc TRUE)
+@@ -419,6 +426,12 @@ if(MSVC)
+   target_compile_options(xenia-shader-cc PRIVATE /EHsc)
+ endif()
+ 
++elseif(XENIA_HOST_SHADER_CC)
++
++add_executable(xenia-shader-cc IMPORTED GLOBAL)
++set_target_properties(xenia-shader-cc PROPERTIES
++  IMPORTED_LOCATION "${XENIA_HOST_SHADER_CC}")
++
+ else()  # _xe_use_host_shader_cc: x64→ARM64 cross-compile, use native build's binary
+ 
+ # Native x64 build lives at <repo>/build/ (xenia-build.py: get_build_dir(None)).
+@@ -476,6 +489,9 @@ add_library(mbedtls STATIC
+   mbedtls/library/sha256.c
+   mbedtls/library/sha512.c
+ )
++if(MINGW)
++  target_sources(mbedtls PRIVATE mbedtls/library/platform.c)
++endif()
+ target_include_directories(mbedtls PUBLIC mbedtls/include mbedtls-xenia)
+ target_compile_definitions(mbedtls PUBLIC
+   "MBEDTLS_CONFIG_FILE=\"xenia_mbedtls_config.h\""
+@@ -510,34 +526,17 @@ target_include_directories(pugixml PUBLIC pugixml/src)
+ # ==============================================================================
+ # snappy
+ # ==============================================================================
+-# Generate snappy-stubs-public.h if missing
+-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/snappy/snappy-stubs-public.h")
+-  if(XE_TARGET_X86_64)
+-    set(_snappy_avx_flag "-DSNAPPY_REQUIRE_AVX=ON")
+-  else()
+-    set(_snappy_avx_flag "-DSNAPPY_REQUIRE_AVX=OFF")
+-  endif()
+-  execute_process(
+-    COMMAND ${CMAKE_COMMAND}
+-      -DSNAPPY_BUILD_TESTS=OFF
+-      -DSNAPPY_BUILD_BENCHMARKS=OFF
+-      ${_snappy_avx_flag}
+-      ${CMAKE_CURRENT_SOURCE_DIR}/snappy
+-      -B${CMAKE_CURRENT_SOURCE_DIR}/snappy
+-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+-  )
++# Configure headers with the active target toolchain, never the host compiler.
++set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
++set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
++set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
++set(SNAPPY_REQUIRE_AVX ${XE_TARGET_X86_64} CACHE BOOL "" FORCE)
++add_subdirectory(snappy EXCLUDE_FROM_ALL)
++if(APPLE)
++  # GPU trace writers derive from snappy::Sink with RTTI enabled. Override
++  # Snappy's directory-wide -fno-rtti so its key function emits base typeinfo.
++  target_compile_options(snappy PRIVATE -frtti)
+ endif()
+-add_library(snappy STATIC
+-  snappy/snappy-internal.h
+-  snappy/snappy-sinksource.cc
+-  snappy/snappy-sinksource.h
+-  snappy/snappy-stubs-internal.cc
+-  snappy/snappy-stubs-internal.h
+-  snappy/snappy-stubs-public.h
+-  snappy/snappy.cc
+-  snappy/snappy.h
+-)
+-target_include_directories(snappy PUBLIC snappy)
+ 
+ # ==============================================================================
+ # xxhash
+@@ -696,7 +695,15 @@ if(WIN32)
+     libusb/libusb/os/windows_winusb.c
+     libusb/libusb/os/windows_winusb.h
+   )
+-  target_include_directories(libusb PUBLIC libusb/libusb PRIVATE libusb/msvc)
++  if(MINGW)
++    set(_xe_libusb_config_dir "${CMAKE_CURRENT_BINARY_DIR}/libusb-config")
++    file(MAKE_DIRECTORY "${_xe_libusb_config_dir}")
++    file(WRITE "${_xe_libusb_config_dir}/config.h"
++      "#define DEFAULT_VISIBILITY\n#define ENABLE_LOGGING 1\n#define PLATFORM_WINDOWS 1\n#define PRINTF_FORMAT(a, b)\n")
++    target_include_directories(libusb PUBLIC libusb/libusb PRIVATE "${_xe_libusb_config_dir}")
++  else()
++    target_include_directories(libusb PUBLIC libusb/libusb PRIVATE libusb/msvc)
++  endif()
+ endif()
+ 
+ # ==============================================================================
+diff --git a/third_party/mbedtls-xenia/xenia_mbedtls_config.h b/third_party/mbedtls-xenia/xenia_mbedtls_config.h
+index cd5c915..e86f47d 100644
+--- a/third_party/mbedtls-xenia/xenia_mbedtls_config.h
++++ b/third_party/mbedtls-xenia/xenia_mbedtls_config.h
+@@ -3,6 +3,11 @@
+ #ifndef XENIA_MBEDTLS_CONFIG_H_
+ #define XENIA_MBEDTLS_CONFIG_H_
+ 
++#if defined(__MINGW32__)
++// MinGW requires the Mbed TLS snprintf/vsnprintf platform layer.
++#define MBEDTLS_PLATFORM_C
++#endif
++
+ #define MBEDTLS_AES_C
+ #define MBEDTLS_BIGNUM_C
+ #define MBEDTLS_CIPHER_MODE_CBC
+diff --git a/third_party/microprofile/microprofile.h b/third_party/microprofile/microprofile.h
+index 892609d..b295506 100644
+--- a/third_party/microprofile/microprofile.h
++++ b/third_party/microprofile/microprofile.h
+@@ -2911,7 +2911,7 @@ void MicroProfileDumpHtml(MicroProfileWriteCallback CB, void* Handle, int nMaxFr
+ 	MicroProfilePrintf(CB, Handle, "var DumpHost = '%s';\n", pHost ? pHost : "");
+ 	time_t CaptureTime;
+ 	time(&CaptureTime);
+-	MicroProfilePrintf(CB, Handle, "var DumpUtcCaptureTime = %ld;\n", CaptureTime);
++    MicroProfilePrintf(CB, Handle, "var DumpUtcCaptureTime = %lld;\n", static_cast<long long>(CaptureTime));
+ 	MicroProfilePrintf(CB, Handle, "var AggregateInfo = {'Frames':%d, 'Time':%f};\n", S.nAggregateFrames, fAggregateMs);
+ 
+ 	//categories
+diff --git a/src/xenia/ui/d3d12/d3d12_mingw_uuid.h b/src/xenia/ui/d3d12/d3d12_mingw_uuid.h
+new file mode 100644
+index 0000000..e036629
+--- /dev/null
++++ b/src/xenia/ui/d3d12/d3d12_mingw_uuid.h
+@@ -0,0 +1,111 @@
++// MinGW UUID mappings from the pinned DirectX-Headers interfaces.
++#ifndef XENIA_UI_D3D12_D3D12_MINGW_UUID_H_
++#define XENIA_UI_D3D12_D3D12_MINGW_UUID_H_
++
++__CRT_UUID_DECL(ID3D12Object, 0xc4fec28f, 0x7966, 0x4e95, 0x9f, 0x94, 0xf4, 0x31, 0xcb, 0x56, 0xc3, 0xb8)
++__CRT_UUID_DECL(ID3D12DeviceChild, 0x905db94b, 0xa00c, 0x4140, 0x9d, 0xf5, 0x2b, 0x64, 0xca, 0x9e, 0xa3, 0x57)
++__CRT_UUID_DECL(ID3D12RootSignature, 0xc54a6b66, 0x72df, 0x4ee8, 0x8b, 0xe5, 0xa9, 0x46, 0xa1, 0x42, 0x92, 0x14)
++__CRT_UUID_DECL(ID3D12RootSignatureDeserializer, 0x34ab647b, 0x3cc8, 0x46ac, 0x84, 0x1b, 0xc0, 0x96, 0x56, 0x45, 0xc0, 0x46)
++__CRT_UUID_DECL(ID3D12VersionedRootSignatureDeserializer, 0x7f91ce67, 0x090c, 0x4bb7, 0xb7, 0x8e, 0xed, 0x8f, 0xf2, 0xe3, 0x1d, 0xa0)
++__CRT_UUID_DECL(ID3D12Pageable, 0x63ee58fb, 0x1268, 0x4835, 0x86, 0xda, 0xf0, 0x08, 0xce, 0x62, 0xf0, 0xd6)
++__CRT_UUID_DECL(ID3D12Heap, 0x6b3b2502, 0x6e51, 0x45b3, 0x90, 0xee, 0x98, 0x84, 0x26, 0x5e, 0x8d, 0xf3)
++__CRT_UUID_DECL(ID3D12Resource, 0x696442be, 0xa72e, 0x4059, 0xbc, 0x79, 0x5b, 0x5c, 0x98, 0x04, 0x0f, 0xad)
++__CRT_UUID_DECL(ID3D12CommandAllocator, 0x6102dee4, 0xaf59, 0x4b09, 0xb9, 0x99, 0xb4, 0x4d, 0x73, 0xf0, 0x9b, 0x24)
++__CRT_UUID_DECL(ID3D12Fence, 0x0a753dcf, 0xc4d8, 0x4b91, 0xad, 0xf6, 0xbe, 0x5a, 0x60, 0xd9, 0x5a, 0x76)
++__CRT_UUID_DECL(ID3D12Fence1, 0x433685fe, 0xe22b, 0x4ca0, 0xa8, 0xdb, 0xb5, 0xb4, 0xf4, 0xdd, 0x0e, 0x4a)
++__CRT_UUID_DECL(ID3D12PipelineState, 0x765a30f3, 0xf624, 0x4c6f, 0xa8, 0x28, 0xac, 0xe9, 0x48, 0x62, 0x24, 0x45)
++__CRT_UUID_DECL(ID3D12PipelineState1, 0x5646804c, 0x9638, 0x48f7, 0x91, 0x82, 0xb3, 0xee, 0x5a, 0x6b, 0x60, 0xfb)
++__CRT_UUID_DECL(ID3D12DescriptorHeap, 0x8efb471d, 0x616c, 0x4f49, 0x90, 0xf7, 0x12, 0x7b, 0xb7, 0x63, 0xfa, 0x51)
++__CRT_UUID_DECL(ID3D12QueryHeap, 0x0d9658ae, 0xed45, 0x469e, 0xa6, 0x1d, 0x97, 0x0e, 0xc5, 0x83, 0xca, 0xb4)
++__CRT_UUID_DECL(ID3D12CommandSignature, 0xc36a797c, 0xec80, 0x4f0a, 0x89, 0x85, 0xa7, 0xb2, 0x47, 0x50, 0x82, 0xd1)
++__CRT_UUID_DECL(ID3D12CommandList, 0x7116d91c, 0xe7e4, 0x47ce, 0xb8, 0xc6, 0xec, 0x81, 0x68, 0xf4, 0x37, 0xe5)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList, 0x5b160d0f, 0xac1b, 0x4185, 0x8b, 0xa8, 0xb3, 0xae, 0x42, 0xa5, 0xa4, 0x55)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList1, 0x553103fb, 0x1fe7, 0x4557, 0xbb, 0x38, 0x94, 0x6d, 0x7d, 0x0e, 0x7c, 0xa7)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList2, 0x38c3e585, 0xff17, 0x412c, 0x91, 0x50, 0x4f, 0xc6, 0xf9, 0xd7, 0x2a, 0x28)
++__CRT_UUID_DECL(ID3D12CommandQueue, 0x0ec870a6, 0x5d7e, 0x4c22, 0x8c, 0xfc, 0x5b, 0xaa, 0xe0, 0x76, 0x16, 0xed)
++__CRT_UUID_DECL(ID3D12CommandQueue1, 0x3a3c3165, 0x0ee7, 0x4b8e, 0xa0, 0xaf, 0x63, 0x56, 0xb4, 0xc3, 0xbb, 0xb9)
++__CRT_UUID_DECL(ID3D12Device, 0x189819f1, 0x1db6, 0x4b57, 0xbe, 0x54, 0x18, 0x21, 0x33, 0x9b, 0x85, 0xf7)
++__CRT_UUID_DECL(ID3D12PipelineLibrary, 0xc64226a8, 0x9201, 0x46af, 0xb4, 0xcc, 0x53, 0xfb, 0x9f, 0xf7, 0x41, 0x4f)
++__CRT_UUID_DECL(ID3D12PipelineLibrary1, 0x80eabf42, 0x2568, 0x4e5e, 0xbd, 0x82, 0xc3, 0x7f, 0x86, 0x96, 0x1d, 0xc3)
++__CRT_UUID_DECL(ID3D12Device1, 0x77acce80, 0x638e, 0x4e65, 0x88, 0x95, 0xc1, 0xf2, 0x33, 0x86, 0x86, 0x3e)
++__CRT_UUID_DECL(ID3D12Device2, 0x30baa41e, 0xb15b, 0x475c, 0xa0, 0xbb, 0x1a, 0xf5, 0xc5, 0xb6, 0x43, 0x28)
++__CRT_UUID_DECL(ID3D12Device3, 0x81dadc15, 0x2bad, 0x4392, 0x93, 0xc5, 0x10, 0x13, 0x45, 0xc4, 0xaa, 0x98)
++__CRT_UUID_DECL(ID3D12ProtectedSession, 0xa1533d18, 0x0ac1, 0x4084, 0x85, 0xb9, 0x89, 0xa9, 0x61, 0x16, 0x80, 0x6b)
++__CRT_UUID_DECL(ID3D12ProtectedResourceSession, 0x6cd696f4, 0xf289, 0x40cc, 0x80, 0x91, 0x5a, 0x6c, 0x0a, 0x09, 0x9c, 0x3d)
++__CRT_UUID_DECL(ID3D12Device4, 0xe865df17, 0xa9ee, 0x46f9, 0xa4, 0x63, 0x30, 0x98, 0x31, 0x5a, 0xa2, 0xe5)
++__CRT_UUID_DECL(ID3D12LifetimeOwner, 0xe667af9f, 0xcd56, 0x4f46, 0x83, 0xce, 0x03, 0x2e, 0x59, 0x5d, 0x70, 0xa8)
++__CRT_UUID_DECL(ID3D12SwapChainAssistant, 0xf1df64b6, 0x57fd, 0x49cd, 0x88, 0x07, 0xc0, 0xeb, 0x88, 0xb4, 0x5c, 0x8f)
++__CRT_UUID_DECL(ID3D12LifetimeTracker, 0x3fd03d36, 0x4eb1, 0x424a, 0xa5, 0x82, 0x49, 0x4e, 0xcb, 0x8b, 0xa8, 0x13)
++__CRT_UUID_DECL(ID3D12StateObject, 0x47016943, 0xfca8, 0x4594, 0x93, 0xea, 0xaf, 0x25, 0x8b, 0x55, 0x34, 0x6d)
++__CRT_UUID_DECL(ID3D12StateObjectProperties, 0xde5fa827, 0x9bf9, 0x4f26, 0x89, 0xff, 0xd7, 0xf5, 0x6f, 0xde, 0x38, 0x60)
++__CRT_UUID_DECL(ID3D12StateObjectProperties1, 0x460caac7, 0x1d24, 0x446a, 0xa1, 0x84, 0xca, 0x67, 0xdb, 0x49, 0x41, 0x38)
++__CRT_UUID_DECL(ID3D12StateObjectProperties2, 0xd5e82917, 0xf0f1, 0x44cf, 0xae, 0x5e, 0xce, 0x22, 0x2d, 0xd0, 0xb8, 0x84)
++__CRT_UUID_DECL(ID3D12WorkGraphProperties, 0x065acf71, 0xf863, 0x4b89, 0x82, 0xf4, 0x02, 0xe4, 0xd5, 0x88, 0x67, 0x57)
++__CRT_UUID_DECL(ID3D12Device5, 0x8b4f173b, 0x2fea, 0x4b80, 0x8f, 0x58, 0x43, 0x07, 0x19, 0x1a, 0xb9, 0x5d)
++__CRT_UUID_DECL(ID3D12DeviceRemovedExtendedDataSettings, 0x82bc481c, 0x6b9b, 0x4030, 0xae, 0xdb, 0x7e, 0xe3, 0xd1, 0xdf, 0x1e, 0x63)
++__CRT_UUID_DECL(ID3D12DeviceRemovedExtendedDataSettings1, 0xdbd5ae51, 0x3317, 0x4f0a, 0xad, 0xf9, 0x1d, 0x7c, 0xed, 0xca, 0xae, 0x0b)
++__CRT_UUID_DECL(ID3D12DeviceRemovedExtendedDataSettings2, 0x61552388, 0x01ab, 0x4008, 0xa4, 0x36, 0x83, 0xdb, 0x18, 0x95, 0x66, 0xea)
++__CRT_UUID_DECL(ID3D12DeviceRemovedExtendedData, 0x98931d33, 0x5ae8, 0x4791, 0xaa, 0x3c, 0x1a, 0x73, 0xa2, 0x93, 0x4e, 0x71)
++__CRT_UUID_DECL(ID3D12DeviceRemovedExtendedData1, 0x9727a022, 0xcf1d, 0x4dda, 0x9e, 0xba, 0xef, 0xfa, 0x65, 0x3f, 0xc5, 0x06)
++__CRT_UUID_DECL(ID3D12DeviceRemovedExtendedData2, 0x67fc5816, 0xe4ca, 0x4915, 0xbf, 0x18, 0x42, 0x54, 0x12, 0x72, 0xda, 0x54)
++__CRT_UUID_DECL(ID3D12Device6, 0xc70b221b, 0x40e4, 0x4a17, 0x89, 0xaf, 0x02, 0x5a, 0x07, 0x27, 0xa6, 0xdc)
++__CRT_UUID_DECL(ID3D12ProtectedResourceSession1, 0xd6f12dd6, 0x76fb, 0x406e, 0x89, 0x61, 0x42, 0x96, 0xee, 0xfc, 0x04, 0x09)
++__CRT_UUID_DECL(ID3D12Device7, 0x5c014b53, 0x68a1, 0x4b9b, 0x8b, 0xd1, 0xdd, 0x60, 0x46, 0xb9, 0x35, 0x8b)
++__CRT_UUID_DECL(ID3D12Device8, 0x9218e6bb, 0xf944, 0x4f7e, 0xa7, 0x5c, 0xb1, 0xb2, 0xc7, 0xb7, 0x01, 0xf3)
++__CRT_UUID_DECL(ID3D12Resource1, 0x9d5e227a, 0x4430, 0x4161, 0x88, 0xb3, 0x3e, 0xca, 0x6b, 0xb1, 0x6e, 0x19)
++__CRT_UUID_DECL(ID3D12Resource2, 0xbe36ec3b, 0xea85, 0x4aeb, 0xa4, 0x5a, 0xe9, 0xd7, 0x64, 0x04, 0xa4, 0x95)
++__CRT_UUID_DECL(ID3D12Heap1, 0x572f7389, 0x2168, 0x49e3, 0x96, 0x93, 0xd6, 0xdf, 0x58, 0x71, 0xbf, 0x6d)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList3, 0x6fda83a7, 0xb84c, 0x4e38, 0x9a, 0xc8, 0xc7, 0xbd, 0x22, 0x01, 0x6b, 0x3d)
++__CRT_UUID_DECL(ID3D12MetaCommand, 0xdbb84c27, 0x36ce, 0x4fc9, 0xb8, 0x01, 0xf0, 0x48, 0xc4, 0x6a, 0xc5, 0x70)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList4, 0x8754318e, 0xd3a9, 0x4541, 0x98, 0xcf, 0x64, 0x5b, 0x50, 0xdc, 0x48, 0x74)
++__CRT_UUID_DECL(ID3D12ShaderCacheSession, 0x28e2495d, 0x0f64, 0x4ae4, 0xa6, 0xec, 0x12, 0x92, 0x55, 0xdc, 0x49, 0xa8)
++__CRT_UUID_DECL(ID3D12Device9, 0x4c80e962, 0xf032, 0x4f60, 0xbc, 0x9e, 0xeb, 0xc2, 0xcf, 0xa1, 0xd8, 0x3c)
++__CRT_UUID_DECL(ID3D12Device10, 0x517f8718, 0xaa66, 0x49f9, 0xb0, 0x2b, 0xa7, 0xab, 0x89, 0xc0, 0x60, 0x31)
++__CRT_UUID_DECL(ID3D12Device11, 0x5405c344, 0xd457, 0x444e, 0xb4, 0xdd, 0x23, 0x66, 0xe4, 0x5a, 0xee, 0x39)
++__CRT_UUID_DECL(ID3D12Device12, 0x5af5c532, 0x4c91, 0x4cd0, 0xb5, 0x41, 0x15, 0xa4, 0x05, 0x39, 0x5f, 0xc5)
++__CRT_UUID_DECL(ID3D12Device13, 0x14eecffc, 0x4df8, 0x40f7, 0xa1, 0x18, 0x5c, 0x81, 0x6f, 0x45, 0x69, 0x5e)
++__CRT_UUID_DECL(ID3D12Device14, 0x5f6e592d, 0xd895, 0x44c2, 0x8e, 0x4a, 0x88, 0xad, 0x49, 0x26, 0xd3, 0x23)
++__CRT_UUID_DECL(ID3D12StateObjectDatabase, 0xc56060b7, 0xb5fc, 0x4135, 0x98, 0xe0, 0xa1, 0xe9, 0x99, 0x7e, 0xac, 0xe0)
++__CRT_UUID_DECL(ID3D12VirtualizationGuestDevice, 0xbc66d368, 0x7373, 0x4943, 0x87, 0x57, 0xfc, 0x87, 0xdc, 0x79, 0xe4, 0x76)
++__CRT_UUID_DECL(ID3D12Tools, 0x7071e1f0, 0xe84b, 0x4b33, 0x97, 0x4f, 0x12, 0xfa, 0x49, 0xde, 0x65, 0xc5)
++__CRT_UUID_DECL(ID3D12Tools1, 0xe4fbc019, 0xdd3c, 0x43e1, 0x8f, 0x32, 0x7f, 0x64, 0x95, 0x75, 0xf0, 0xa0)
++__CRT_UUID_DECL(ID3D12Tools2, 0x01d393c5, 0xc9b0, 0x42a1, 0x95, 0x8c, 0xc2, 0x6b, 0x02, 0xd4, 0xd0, 0x97)
++__CRT_UUID_DECL(ID3D12PageableTools, 0x8f1359db, 0xd8d1, 0x42f9, 0xb5, 0xcf, 0x79, 0xf4, 0xcb, 0xad, 0x0d, 0x3d)
++__CRT_UUID_DECL(ID3D12DeviceTools, 0x2ea68e9c, 0x19c3, 0x4e47, 0xa1, 0x09, 0x6c, 0xda, 0xdf, 0xf0, 0xac, 0xa9)
++__CRT_UUID_DECL(ID3D12DeviceTools1, 0xe30e9fc7, 0xe641, 0x4d6e, 0x8a, 0x81, 0x9d, 0xd9, 0x20, 0x6e, 0xc4, 0x7a)
++__CRT_UUID_DECL(ID3D12SDKConfiguration, 0xe9eb5314, 0x33aa, 0x42b2, 0xa7, 0x18, 0xd7, 0x7f, 0x58, 0xb1, 0xf1, 0xc7)
++__CRT_UUID_DECL(ID3D12SDKConfiguration1, 0x8aaf9303, 0xad25, 0x48b9, 0x9a, 0x57, 0xd9, 0xc3, 0x7e, 0x00, 0x9d, 0x9f)
++__CRT_UUID_DECL(ID3D12DeviceFactory, 0x61f307d3, 0xd34e, 0x4e7c, 0x83, 0x74, 0x3b, 0xa4, 0xde, 0x23, 0xcc, 0xcb)
++__CRT_UUID_DECL(ID3D12DeviceConfiguration, 0x78dbf87b, 0xf766, 0x422b, 0xa6, 0x1c, 0xc8, 0xc4, 0x46, 0xbd, 0xb9, 0xad)
++__CRT_UUID_DECL(ID3D12DeviceConfiguration1, 0xed342442, 0x6343, 0x4e16, 0xbb, 0x82, 0xa3, 0xa5, 0x77, 0x87, 0x4e, 0x56)
++__CRT_UUID_DECL(ID3D12StateObjectDatabaseFactory, 0xf5b066f0, 0x648a, 0x4611, 0xbd, 0x41, 0x27, 0xfd, 0x09, 0x48, 0xb9, 0xeb)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList5, 0x55050859, 0x4024, 0x474c, 0x87, 0xf5, 0x64, 0x72, 0xea, 0xee, 0x44, 0xea)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList6, 0xc3827890, 0xe548, 0x4cfa, 0x96, 0xcf, 0x56, 0x89, 0xa9, 0x37, 0x0f, 0x80)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList7, 0xdd171223, 0x8b61, 0x4769, 0x90, 0xe3, 0x16, 0x0c, 0xcd, 0xe4, 0xe2, 0xc1)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList8, 0xee936ef9, 0x599d, 0x4d28, 0x93, 0x8e, 0x23, 0xc4, 0xad, 0x05, 0xce, 0x51)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList9, 0x34ed2808, 0xffe6, 0x4c2b, 0xb1, 0x1a, 0xca, 0xbd, 0x2b, 0x0c, 0x59, 0xe1)
++__CRT_UUID_DECL(ID3D12GraphicsCommandList10, 0x7013c015, 0xd161, 0x4b63, 0xa0, 0x8c, 0x23, 0x85, 0x52, 0xdd, 0x8a, 0xcc)
++__CRT_UUID_DECL(ID3D12DSRDeviceFactory, 0xf343d1a0, 0xafe3, 0x439f, 0xb1, 0x3d, 0xcd, 0x87, 0xa4, 0x3b, 0x70, 0xca)
++__CRT_UUID_DECL(ID3D12GBVDiagnostics, 0x597985ab, 0x9b75, 0x4dbb, 0xbe, 0x23, 0x07, 0x61, 0x19, 0x5b, 0xeb, 0xee)
++__CRT_UUID_DECL(ID3D12Debug, 0x344488b7, 0x6846, 0x474b, 0xb9, 0x89, 0xf0, 0x27, 0x44, 0x82, 0x45, 0xe0)
++__CRT_UUID_DECL(ID3D12Debug1, 0xaffaa4ca, 0x63fe, 0x4d8e, 0xb8, 0xad, 0x15, 0x90, 0x00, 0xaf, 0x43, 0x04)
++__CRT_UUID_DECL(ID3D12Debug2, 0x93a665c4, 0xa3b2, 0x4e5d, 0xb6, 0x92, 0xa2, 0x6a, 0xe1, 0x4e, 0x33, 0x74)
++__CRT_UUID_DECL(ID3D12Debug3, 0x5cf4e58f, 0xf671, 0x4ff1, 0xa5, 0x42, 0x36, 0x86, 0xe3, 0xd1, 0x53, 0xd1)
++__CRT_UUID_DECL(ID3D12Debug4, 0x014b816e, 0x9ec5, 0x4a2f, 0xa8, 0x45, 0xff, 0xbe, 0x44, 0x1c, 0xe1, 0x3a)
++__CRT_UUID_DECL(ID3D12Debug5, 0x548d6b12, 0x09fa, 0x40e0, 0x90, 0x69, 0x5d, 0xcd, 0x58, 0x9a, 0x52, 0xc9)
++__CRT_UUID_DECL(ID3D12Debug6, 0x82a816d6, 0x5d01, 0x4157, 0x97, 0xd0, 0x49, 0x75, 0x46, 0x3f, 0xd1, 0xed)
++__CRT_UUID_DECL(ID3D12DebugDevice1, 0xa9b71770, 0xd099, 0x4a65, 0xa6, 0x98, 0x3d, 0xee, 0x10, 0x02, 0x0f, 0x88)
++__CRT_UUID_DECL(ID3D12DebugDevice, 0x3febd6dd, 0x4973, 0x4787, 0x81, 0x94, 0xe4, 0x5f, 0x9e, 0x28, 0x92, 0x3e)
++__CRT_UUID_DECL(ID3D12DebugDevice2, 0x60eccbc1, 0x378d, 0x4df1, 0x89, 0x4c, 0xf8, 0xac, 0x5c, 0xe4, 0xd7, 0xdd)
++__CRT_UUID_DECL(ID3D12DebugCommandQueue, 0x09e0bf36, 0x54ac, 0x484f, 0x88, 0x47, 0x4b, 0xae, 0xea, 0xb6, 0x05, 0x3a)
++__CRT_UUID_DECL(ID3D12DebugCommandQueue1, 0x16be35a2, 0xbfd6, 0x49f2, 0xbc, 0xae, 0xea, 0xae, 0x4a, 0xff, 0x86, 0x2d)
++__CRT_UUID_DECL(ID3D12DebugCommandList1, 0x102ca951, 0x311b, 0x4b01, 0xb1, 0x1f, 0xec, 0xb8, 0x3e, 0x06, 0x1b, 0x37)
++__CRT_UUID_DECL(ID3D12DebugCommandList, 0x09e0bf36, 0x54ac, 0x484f, 0x88, 0x47, 0x4b, 0xae, 0xea, 0xb6, 0x05, 0x3f)
++__CRT_UUID_DECL(ID3D12DebugCommandList2, 0xaeb575cf, 0x4e06, 0x48be, 0xba, 0x3b, 0xc4, 0x50, 0xfc, 0x96, 0x65, 0x2e)
++__CRT_UUID_DECL(ID3D12DebugCommandList3, 0x197d5e15, 0x4d37, 0x4d34, 0xaf, 0x78, 0x72, 0x4c, 0xd7, 0x0f, 0xdb, 0x1f)
++__CRT_UUID_DECL(ID3D12SharingContract, 0x0adf7d52, 0x929c, 0x4e61, 0xad, 0xdb, 0xff, 0xed, 0x30, 0xde, 0x66, 0xef)
++__CRT_UUID_DECL(ID3D12ManualWriteTrackingResource, 0x86ca3b85, 0x49ad, 0x4b6e, 0xae, 0xd5, 0xed, 0xdb, 0x18, 0x54, 0x0f, 0x41)
++__CRT_UUID_DECL(ID3D12InfoQueue, 0x0742a90b, 0xc387, 0x483f, 0xb9, 0x46, 0x30, 0xa7, 0xe4, 0xe6, 0x14, 0x58)
++__CRT_UUID_DECL(ID3D12InfoQueue1, 0x2852dd88, 0xb484, 0x4c0c, 0xb6, 0xb1, 0x67, 0x16, 0x85, 0x00, 0xe6, 0x00)
++
++#endif

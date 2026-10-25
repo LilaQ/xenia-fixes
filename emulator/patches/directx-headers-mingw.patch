@@ -1,0 +1,158 @@
+diff --git a/include/directx/d3d12.h b/include/directx/d3d12.h
+index bac671d..1849290 100644
+--- a/include/directx/d3d12.h
++++ b/include/directx/d3d12.h
+@@ -4885,6 +4885,13 @@ EXTERN_C const IID IID_ID3D12Heap;
+ #else
+         virtual D3D12_HEAP_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_HEAP_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_HEAP_DESC GetDesc() {
++            D3D12_HEAP_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -5042,6 +5049,13 @@ EXTERN_C const IID IID_ID3D12Resource;
+ #else
+         virtual D3D12_RESOURCE_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_RESOURCE_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_RESOURCE_DESC GetDesc() {
++            D3D12_RESOURCE_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+         virtual D3D12_GPU_VIRTUAL_ADDRESS STDMETHODCALLTYPE GetGPUVirtualAddress( void) = 0;
+@@ -5983,6 +5997,13 @@ EXTERN_C const IID IID_ID3D12DescriptorHeap;
+ #else
+         virtual D3D12_DESCRIPTOR_HEAP_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_DESCRIPTOR_HEAP_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_DESCRIPTOR_HEAP_DESC GetDesc() {
++            D3D12_DESCRIPTOR_HEAP_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+ #if defined(_MSC_VER) || !defined(_WIN32)
+@@ -5990,6 +6011,13 @@ EXTERN_C const IID IID_ID3D12DescriptorHeap;
+ #else
+         virtual D3D12_CPU_DESCRIPTOR_HANDLE *STDMETHODCALLTYPE GetCPUDescriptorHandleForHeapStart( 
+             D3D12_CPU_DESCRIPTOR_HANDLE * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_CPU_DESCRIPTOR_HANDLE GetCPUDescriptorHandleForHeapStart() {
++            D3D12_CPU_DESCRIPTOR_HANDLE result;
++            GetCPUDescriptorHandleForHeapStart(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+ #if defined(_MSC_VER) || !defined(_WIN32)
+@@ -5997,6 +6025,13 @@ EXTERN_C const IID IID_ID3D12DescriptorHeap;
+ #else
+         virtual D3D12_GPU_DESCRIPTOR_HANDLE *STDMETHODCALLTYPE GetGPUDescriptorHandleForHeapStart( 
+             D3D12_GPU_DESCRIPTOR_HANDLE * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_GPU_DESCRIPTOR_HANDLE GetGPUDescriptorHandleForHeapStart() {
++            D3D12_GPU_DESCRIPTOR_HANDLE result;
++            GetGPUDescriptorHandleForHeapStart(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -8971,6 +9006,13 @@ EXTERN_C const IID IID_ID3D12CommandQueue;
+ #else
+         virtual D3D12_COMMAND_QUEUE_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_COMMAND_QUEUE_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_COMMAND_QUEUE_DESC GetDesc() {
++            D3D12_COMMAND_QUEUE_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -12763,6 +12805,13 @@ EXTERN_C const IID IID_ID3D12ProtectedResourceSession;
+ #else
+         virtual D3D12_PROTECTED_RESOURCE_SESSION_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_PROTECTED_RESOURCE_SESSION_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_PROTECTED_RESOURCE_SESSION_DESC GetDesc() {
++            D3D12_PROTECTED_RESOURCE_SESSION_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -18357,6 +18406,13 @@ EXTERN_C const IID IID_ID3D12ProtectedResourceSession1;
+ #else
+         virtual D3D12_PROTECTED_RESOURCE_SESSION_DESC1 *STDMETHODCALLTYPE GetDesc1( 
+             D3D12_PROTECTED_RESOURCE_SESSION_DESC1 * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_PROTECTED_RESOURCE_SESSION_DESC1 GetDesc1() {
++            D3D12_PROTECTED_RESOURCE_SESSION_DESC1 result;
++            GetDesc1(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -20545,6 +20601,13 @@ EXTERN_C const IID IID_ID3D12Resource2;
+ #else
+         virtual D3D12_RESOURCE_DESC1 *STDMETHODCALLTYPE GetDesc1( 
+             D3D12_RESOURCE_DESC1 * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_RESOURCE_DESC1 GetDesc1() {
++            D3D12_RESOURCE_DESC1 result;
++            GetDesc1(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -23098,6 +23161,13 @@ EXTERN_C const IID IID_ID3D12ShaderCacheSession;
+ #else
+         virtual D3D12_SHADER_CACHE_SESSION_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_SHADER_CACHE_SESSION_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_SHADER_CACHE_SESSION_DESC GetDesc() {
++            D3D12_SHADER_CACHE_SESSION_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+     };
+@@ -30940,6 +31010,13 @@ EXTERN_C const IID IID_ID3D12DeviceConfiguration;
+ #else
+         virtual D3D12_DEVICE_CONFIGURATION_DESC *STDMETHODCALLTYPE GetDesc( 
+             D3D12_DEVICE_CONFIGURATION_DESC * RetVal) = 0;
++#if defined(__MINGW32__)
++        D3D12_DEVICE_CONFIGURATION_DESC GetDesc() {
++            D3D12_DEVICE_CONFIGURATION_DESC result;
++            GetDesc(&result);
++            return result;
++        }
++#endif
+ #endif
+         
+         virtual HRESULT STDMETHODCALLTYPE GetEnabledExperimentalFeatures( 

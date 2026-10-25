@@ -1,0 +1,32 @@
+# The Force Unleashed II 4C4107F2: Vulkan comparison with unsuccessful native FPS patch disabled.
+# Preserve private profile slots from the Canary game config.
+
+[GPU]
+gpu = "vulkan"
+render_target_path = "performance"
+guest_display_refresh_cap = true
+framerate_limit = 60
+readback_resolve = true
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Console]
+use_50Hz_mode = false
+
+[Storage]
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+
+[Memory]
+scribble_heap = true
+scribble_heap_value = 255

@@ -1,0 +1,45 @@
+# Official has207/xenia-edge release 644ba68; TFU2 native render targets and 60 Hz timestep.
+# Release archive SHA-256: 8ea16a7ca31fcf56a0bae7d77f3d220da5402fc961a76c973cc02c62c3a809a6
+# Includes ROV placeholder pipeline link fix dd63e936a6debbcefb4db2701b97d1ab7e7c0786.
+# Preserve private profile slots from Canary; they are not distributed.
+# Requires game-patches/4C4107F2 - The Force Unleashed II 60FPS.patch.toml.
+# Keep Strict occlusion and readback for object visibility. The accuracy/ROV
+# path is too slow for the 60 Hz timestep on the tested cabinet GPU.
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+guest_display_refresh_cap = false
+framerate_limit = 60
+occlusion_query = "strict"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[UI]
+show_achievement_notification = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Console]
+use_50Hz_mode = false
+
+[Memory]
+scribble_heap = true
+scribble_heap_value = 255
+
+[APU]
+xma_decoder = "new"
+use_dedicated_xma_thread = false
+
+[Storage]
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+cache_root = "D:/LaunchBox/Emulators/Xenia Edge/cache"

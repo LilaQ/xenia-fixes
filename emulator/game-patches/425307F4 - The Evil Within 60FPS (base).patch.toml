@@ -1,0 +1,35 @@
+title_name = "The Evil Within"
+title_id = "425307F4"
+hash = "08E87EF28DE9084B"
+# Installed base executable, media 32232F34; no title update loaded.
+
+[[patch]]
+name = "60 FPS presentation interval"
+desc = "Select one vblank in both renderer initialization paths instead of the default/forced two-vblank interval. Use a 60 FPS host limit. Simulation timing and time_scalar are unchanged."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x8256590C
+value = 0x39600001 # li r11,1; originally lwz r11,0x20(r11) / 0x816B0020
+
+[[patch.be32]]
+address = 0x82565914
+value = 0x39600001 # li r11,1; originally li r11,2 / 0x39600002
+# Both paths merge at 82565918. The interval is stored at renderer+0x36B0
+# by 82565940. The original r_swapInterval CVar is registered with default "2"
+# at 8334218C; changing only host pacing does not change this game setting.
+
+[[patch]]
+name = "Smooth texture streaming (4 pages per frame)"
+desc = "Set the vt_maxPPF default to 4 rather than 16. Spreads virtual-texture uploads across frames; final texture resolution is unchanged, but newly visible pages may converge later. Tested together with the dedicated Evil Within Edge feedback build."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x833466A0
+value = 0x38A88995 # addi r5,r8,-0x766B; original 0x38A889D8
+# Only the vt_maxPPF constructor default-string pointer changes:
+# r8 = 0x820D0000; original string at 820C89D8 is "16".
+# 820C8995 points to the NUL-terminated "4" suffix of the existing "24" literal.
+# No shared literal, simulation clock or texture-resolution value is changed.

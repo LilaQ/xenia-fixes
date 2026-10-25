@@ -1,0 +1,33 @@
+# Skyrim 425307E6, media 34F5B6C3, base hash 4EA242EA99AD16F0.
+# Pinned official Canary 9d08d64, installed as xenia_canary_skyrim.exe.
+# https://github.com/xenia-canary/xenia-canary/releases/tag/9d08d64
+# EXE SHA256: 52fc1978fedd1b7299cdde498c286a49e6d406bf4060bad40109669fc4684319
+# Use the shared Keys2Pad loader with -WatchProcess xenia_canary_skyrim.exe.
+# Retain the owner's Profiles section and the matching enabled 60 FPS patch.
+# The upstream Helgen success report uses this build/hash at stock frame rate;
+# the cabinet's 60 FPS comparison still requires gameplay verification.
+
+[Display]
+fullscreen = true
+
+[GPU]
+gpu = "d3d12"
+vsync = false
+framerate_limit = 60
+readback_resolve = "none"
+render_target_path_d3d12 = ""
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[HID]
+hid = "xinput"
+
+[Storage]
+storage_root = "D:/LaunchBox/Emulators/Xenia Canary"
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+cache_root = "D:/LaunchBox/Emulators/Xenia Canary/cache/skyrim-9d08d64"
+
+[UI]
+show_achievement_notification = true

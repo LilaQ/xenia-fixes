@@ -1,0 +1,29 @@
+# For the separate Edge build with d3d12_snorm16_multiply_scale.
+# Apply as game-specific overrides for title 4B4D0800.
+[D3D12]
+d3d12_snorm16_multiply_scale = true
+d3d12_skip_no_output_draws = true
+d3d12_stencil_plane_copy = true
+d3d12_stage_small_readback = true
+d3d12_gat_async_hdr = true
+
+[GPU]
+render_target_path = "performance"
+depth_bias_shader_offset = true
+depth_float24_convert_in_pixel_shader = true
+depth_float24_round = true
+precise_interpolation = true
+readback_resolve = true
+occlusion_query = "fake"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+framerate_limit = 60
+guest_display_refresh_cap = false
+
+[GPU.Debug]
+snorm16_render_target_full_range = true
+
+[Display]
+fullscreen = true
+host_present_from_non_ui_thread = false
+postprocess_antialiasing = "fxaa"

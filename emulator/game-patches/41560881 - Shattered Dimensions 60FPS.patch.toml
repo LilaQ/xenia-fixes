@@ -1,0 +1,17 @@
+title_name = "Spider-Man: Shattered Dimensions"
+title_id = "41560881"
+hash = "B6F12EF2A529FDE4"
+# Default.xex, media 06AAF6AB, base version 0.0.0.1, no title update.
+
+[[patch]]
+name = "60 FPS presentation interval"
+desc = "Use one vblank instead of the conditional one/two-vblank presentation interval. Pair with a 60 Hz emulator display and normal time_scalar=1. Keep force_depth_clamp=true and gpu_allow_invalid_fetch_constants=false. Actual sustained FPS requires gameplay verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x820F5850
+value = 0x38600001 # li r3,1 (original: addi r3,r11,1 / 0x386B0001)
+# The following store writes object+0x38. CreateDevice receives object+4,
+# so this is the +0x34 PresentationInterval, not the swap effect or timestep.
+# Width, height, simulation timing, culling and object-update LOD are unchanged.

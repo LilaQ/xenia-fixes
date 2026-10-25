@@ -1,0 +1,27 @@
+# The Force Unleashed 4C4107D2 / 4C99AB5DF93A70F3: Edge comparison.
+# Preserve private profile slots from the Canary game config.
+
+[GPU]
+gpu = "d3d12"
+guest_display_refresh_cap = false
+framerate_limit = 60
+readback_resolve = true
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Console]
+use_50Hz_mode = false
+
+[Storage]
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"

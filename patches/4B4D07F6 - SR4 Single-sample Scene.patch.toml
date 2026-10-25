@@ -1,0 +1,29 @@
+title_name = "Saints Row IV: Game of the Century Edition"
+title_id = "4B4D07F6"
+hash = "C875658006E4639C"
+
+[[patch]]
+name = "Single-sample 720p scene"
+desc = "TU1 only: use the native full-frame, single-sample 720p scene layout instead of the two-tile 2x MSAA layout. Preserves native image dimensions and unrelated presentation flags. Use FXAA for output anti-aliasing."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x82EEBD38
+value = 0x39400000
+
+[[patch.be32]]
+address = 0x82EEBD3C
+value = 0x915F000C
+
+[[patch.be32]]
+address = 0x8308B6EC
+value = 0x00000000
+
+[[patch.be32]]
+address = 0x8308B6F8
+value = 0x00000001
+
+[[patch.be32]]
+address = 0x8308B708
+value = 0x00000500

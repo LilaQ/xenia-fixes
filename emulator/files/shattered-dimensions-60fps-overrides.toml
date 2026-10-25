@@ -1,0 +1,11 @@
+# Base version 0.0.0.1, media 06AAF6AB, Default.xex B6F12EF2A529FDE4.
+# Use with game-patches/41560881 - Shattered Dimensions 60FPS.patch.toml.
+[GPU]
+vsync = true
+framerate_limit = 60
+force_depth_clamp = true
+gpu_allow_invalid_fetch_constants = false
+
+[General]
+apply_patches = true
+time_scalar = 1

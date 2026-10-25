@@ -1,0 +1,590 @@
+[
+  {
+    "game": "Army of Two: The Devil's Cartel",
+    "title_id": "454109AB",
+    "module_hash": "9AFBA736404E53F5",
+    "file": "patches/454109AB - Army of Two The Devils Cartel Timing.patch.toml",
+    "options": [
+      {
+        "name": "60 Hz clocks and frame pacing",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Battlefield: Bad Company 2",
+    "title_id": "454108A8",
+    "module_hash": "C1F8A2BE5BCF6B96",
+    "file": "patches/454108A8 - Battlefield Bad Company 2 Animation Timing.patch.toml",
+    "options": [
+      {
+        "name": "Variable-frame animation root motion",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Battlefield: Bad Company 2",
+    "title_id": "454108A8",
+    "module_hash": "C1F8A2BE5BCF6B96",
+    "file": "patches/454108A8 - Battlefield Bad Company 2 Timing.patch.toml",
+    "options": [
+      {
+        "name": "60 Hz game clocks (native FPS unlock companion)",
+        "enabled": false
+      }
+    ]
+  },
+  {
+    "game": "BioShock GOTY / Ultimate Rapture Edition",
+    "title_id": "545407D8",
+    "module_hash": "DA62C7B0EA7405CF",
+    "file": "patches/545407D8 - BioShock Ultimate Rapture 60 FPS.patch.toml",
+    "options": [
+      {
+        "name": "Unlock framerate (native VSYNC 0 command)",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Fable III",
+    "title_id": "4D5308D6",
+    "module_hash": "15A2B07FFF0A2754",
+    "file": "patches/4D5308D6 - Fable III 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS engine and presentation intervals",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Fallout: New Vegas Ultimate Edition (TU5)",
+    "title_id": "425307E0",
+    "module_hash": "BEC503E11EB9D8F9",
+    "file": "patches/425307E0 - Fallout New Vegas Ultimate 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Hitman 2: Silent Assassin HD",
+    "title_id": "5351081C",
+    "module_hash": "D5CC3670FA974441",
+    "file": "patches/5351081C - Hitman 2 Silent Assassin HD 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Hitman: Blood Money HD",
+    "title_id": "534307DB",
+    "module_hash": "4B32E4CDC4BF4164",
+    "file": "patches/534307DB - Hitman Blood Money HD 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Hitman: Contracts HD",
+    "title_id": "5351081C",
+    "module_hash": "B9FAF12B253E03B3",
+    "file": "patches/5351081C - Hitman Contracts HD 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Just Cause 2",
+    "title_id": "534307E7",
+    "module_hash": "12134BD1769BFB2B",
+    "file": "patches/534307E7 - Just Cause 2 TU0 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Just Cause 2",
+    "title_id": "534307E7",
+    "module_hash": "12134BD1769BFB2B",
+    "file": "patches/534307E7 - Just Cause 2 TU0 Required Streaming.patch.toml",
+    "options": [
+      {
+        "name": "Request required world chunks before waiting (experimental)",
+        "enabled": false
+      }
+    ]
+  },
+  {
+    "game": "Just Cause 2",
+    "title_id": "534307E7",
+    "module_hash": "6CDA2880AB433BFF",
+    "file": "patches/534307E7 - Just Cause 2 TU1 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval (TU1)",
+        "enabled": false
+      },
+      {
+        "name": "Immediate presentation with host 60 FPS limit (TU1 test)",
+        "enabled": false
+      },
+      {
+        "name": "60 FPS engine timer and immediate presentation (TU1)",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "L.A. Noire: The Complete Edition",
+    "title_id": "5454086C",
+    "module_hash": "60E4E421F4445C2B",
+    "file": "patches/5454086C - LA Noire Complete Edition 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS Gameplay Timer",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Mafia II",
+    "title_id": "545407E6",
+    "module_hash": "D0F70B7B6332890A",
+    "file": "patches/545407E6 - Mafia II Frame Pacing 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS frame wait",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Max Payne 3",
+    "title_id": "5454086B",
+    "module_hash": "B203CBE51BCF3D72",
+    "file": "patches/5454086B - Max Payne 3 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Medal of Honor: Airborne",
+    "title_id": "454107F6",
+    "module_hash": "496DAFC9BE3E5A9D",
+    "file": "patches/454107F6 - Medal of Honor Airborne 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Medal of Honor: Warfighter",
+    "title_id": "45410993",
+    "module_hash": "FC561A841E368F3D",
+    "file": "patches/45410993 - Medal of Honor Warfighter 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 Hz clocks and frame pacing",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Need for Speed: Rivals (TU2 render-only experiment)",
+    "title_id": "454109C6",
+    "module_hash": "3946E30942DCAF32",
+    "file": "patches/Rivals-render-test.patch.toml",
+    "options": [
+      {
+        "name": "Variable rendering with original simulation (experimental)",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Need for Speed: Rivals (TU2)",
+    "title_id": "454109C6",
+    "module_hash": "3946E30942DCAF32",
+    "file": "patches/454109C6 - Need for Speed Rivals TU2 variable rendering.patch.toml",
+    "options": [
+      {
+        "name": "Variable rendering with original simulation",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Need for Speed: Shift",
+    "title_id": "454108B4",
+    "module_hash": "8F8CCB15050567C3",
+    "file": "patches/454108B4 - Need for Speed Shift 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Need for Speed: The Run (NFS.Main.xex)",
+    "title_id": "4541094A",
+    "module_hash": "B833F1869FAA9190",
+    "file": "patches/4541094A - The Run 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS stable simulation and fast frames",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Red Dead Redemption GOTY TU1 (Disc 1)",
+    "title_id": "5454082B",
+    "module_hash": "D16175F24AF34798",
+    "file": "patches/5454082B - Red Dead Redemption GOTY TU1 Disc 1 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Resident Evil 5",
+    "title_id": "434307D4",
+    "module_hash": "EBE8DC47EB9402EC",
+    "file": "patches/434307D4 - Resident Evil 5 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS - doubled rendering cadence",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Resident Evil 6",
+    "title_id": "43430819",
+    "module_hash": "44A96367B5C19FB1",
+    "file": "patches/43430819 - Resident Evil 6 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS - one render per base-rate tick",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Resident Evil Revelations",
+    "title_id": "43430833",
+    "module_hash": "ADE9590DE9F292C9",
+    "file": "patches/43430833 - Resident Evil Revelations 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS - explicit render limit",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Resident Evil Revelations 2",
+    "title_id": "5841144C",
+    "module_hash": "9FBE98182B30938E",
+    "file": "patches/5841144C - Resident Evil Revelations 2 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS - explicit render limit",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Rock Band 2",
+    "title_id": "45410869",
+    "module_hash": "B94DA74D17CDF26F",
+    "file": "patches/45410869 - Rock Band 2 SEH Boot Fix.patch.toml",
+    "options": [
+      {
+        "name": "Skip SEH null write at EA logo",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Saints Row IV: Game of the Century Edition",
+    "title_id": "4B4D07F6",
+    "module_hash": "C875658006E4639C",
+    "file": "patches/4B4D07F6 - SR4 Single-sample Scene.patch.toml",
+    "options": [
+      {
+        "name": "Single-sample 720p scene",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Saints Row: Gat Out of Hell",
+    "title_id": "4B4D0800",
+    "module_hash": "DC470096D97A0450",
+    "file": "patches/4B4D0800 - Gat Single-sample Scene.patch.toml",
+    "options": [
+      {
+        "name": "Single-sample 720p scene",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Saints Row: The Third: The Full Package",
+    "title_id": "5451086D",
+    "module_hash": "F514A8ECF18C0E5A",
+    "file": "patches/5451086D - SR3 Single-sample Scene.patch.toml",
+    "options": [
+      {
+        "name": "Single-sample 720p scene",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Serious Sam - Double D XXL",
+    "title_id": "58411249",
+    "module_hash": "0F8C087D6FEA1BD4",
+    "file": "patches/58411249 - XXL RuntimeHost.patch.toml",
+    "options": [
+      {
+        "name": "RuntimeHost copy and JIT cache repair",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Shift 2: Unleashed",
+    "title_id": "45410934",
+    "module_hash": "C4CD9F33611C5AFD",
+    "file": "patches/45410934 - Shift 2 Unleashed 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Silent Hill 2 HD",
+    "title_id": "4B4E0845",
+    "module_hash": "F3CA6A39460AF335",
+    "file": "patches/4B4E0845 - Silent Hill 2 HD New Voices.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      },
+      {
+        "name": "Direct-start New Voices",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Silent Hill 2 HD",
+    "title_id": "4B4E0845",
+    "module_hash": "F3CA6A39460AF335",
+    "file": "patches/4B4E0845 - Silent Hill 2 HD Original Voices.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      },
+      {
+        "name": "Direct-start Original Voices",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Silent Hill 3 HD",
+    "title_id": "4B4E0845",
+    "module_hash": "4DC9FF869FF55A1F",
+    "file": "patches/4B4E0845 - Silent Hill 3 HD 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Silent Hill: Homecoming",
+    "title_id": "4B4E07E5",
+    "module_hash": "3DB72D7712F6ECD9",
+    "file": "patches/4B4E07E5 - Silent Hill Homecoming 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS engine limits and render pacing",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Spider-Man 3",
+    "title_id": "415607E2",
+    "module_hash": "74EB693009B1AF55",
+    "file": "patches/415607E2 - Spider-Man 3 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS startup sync mode",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Spider-Man: Edge of Time",
+    "title_id": "415608B2",
+    "module_hash": "26011A843A5386C6",
+    "file": "patches/415608B2 - Edge of Time 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      },
+      {
+        "name": "Full-rate object updates",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Spider-Man: Shattered Dimensions",
+    "title_id": "41560881",
+    "module_hash": "B6F12EF2A529FDE4",
+    "file": "patches/41560881 - Shattered Dimensions 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Star Wars: The Force Unleashed",
+    "title_id": "4C4107D2",
+    "module_hash": "4C99AB5DF93A70F3",
+    "file": "patches/4C4107D2 - The Force Unleashed 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS frame lock",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Star Wars: The Force Unleashed II",
+    "title_id": "4C4107F2",
+    "module_hash": "0C35DD8FCC1766CD",
+    "file": "patches/4C4107F2 - The Force Unleashed II 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS frame-lock initialization",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "The Elder Scrolls IV: Oblivion GOTY (TU3)",
+    "title_id": "425307D1",
+    "module_hash": "B656ED4D389EEF2C",
+    "file": "patches/425307D1 - Oblivion GOTY TU3 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "The Evil Within",
+    "title_id": "425307F4",
+    "module_hash": "08E87EF28DE9084B",
+    "file": "patches/425307F4 - The Evil Within 60FPS (base).patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      },
+      {
+        "name": "Smooth texture streaming (4 pages per frame)",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "The Lord of the Rings: Conquest",
+    "title_id": "45410852",
+    "module_hash": "FFA8A4695F7FC499",
+    "file": "patches/45410852 - The Lord of the Rings Conquest 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS presentation interval",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "The Lord of the Rings: The Battle for Middle-earth II",
+    "title_id": "454107DF",
+    "module_hash": "64CA08FEDC8903CB",
+    "file": "patches/454107DF - BFME II 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS client frame limiter (test)",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Wolfenstein",
+    "title_id": "415607DE",
+    "module_hash": "D4A77E183B2D6868",
+    "file": "patches/415607DE - Wolfenstein Singleplayer 60FPS.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS - one simulation tick per rendered frame",
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "game": "Worms Ultimate Mayhem",
+    "title_id": "58410AFD",
+    "module_hash": "D6BB8FBE542043A8",
+    "file": "patches/58410AFD - Worms Ultimate Mayhem 60FPS Timing.patch.toml",
+    "options": [
+      {
+        "name": "60 FPS simulation timing (requires 60 FPS rendering)",
+        "enabled": true
+      }
+    ]
+  }
+]

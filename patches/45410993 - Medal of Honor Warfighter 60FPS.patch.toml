@@ -1,0 +1,33 @@
+title_name = "Medal of Honor: Warfighter"
+title_id = "45410993"
+hash = "FC561A841E368F3D"
+
+[[patch]]
+ name = "60 Hz clocks and frame pacing"
+ desc = "Set all clock constructors and both MaxSimFps consumers to 60 Hz, using elapsed-time clock mode instead of display-period timing. Keep a 60 FPS host limit. Runtime speed and mission progression require verification."
+ author = "LilaQ"
+ is_enabled = true
+
+[[patch.be32]]
+address = 0x82CD62F0
+value = 0x38A0003C
+
+[[patch.be32]]
+address = 0x82CD64C4
+value = 0x38A0003C
+
+[[patch.be32]]
+address = 0x82CD64F8
+value = 0x38A0003C
+
+[[patch.be32]]
+address = 0x82CD6DB0
+value = 0x38800003
+
+[[patch.be32]]
+address = 0x82ECD500
+value = 0xC00B3B50
+
+[[patch.be32]]
+address = 0x82EC6D3C
+value = 0xC00A3B50

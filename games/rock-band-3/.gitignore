@@ -1,0 +1,8 @@
+build/
+__pycache__/
+*.pyc
+*.xex
+*.pe
+*.bin
+*.log
+*.patch.toml

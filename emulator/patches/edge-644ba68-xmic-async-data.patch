@@ -1,0 +1,232 @@
+diff --git a/src/xenia/kernel/kernel_state.cc b/src/xenia/kernel/kernel_state.cc
+--- a/src/xenia/kernel/kernel_state.cc
++++ b/src/xenia/kernel/kernel_state.cc
+@@ -1289,6 +1289,14 @@
+   dispatch_cond_.notify_all();
+ }
+ 
++void KernelState::QueueHostDispatch(std::function<void()> callback) {
++  {
++    std::lock_guard lock(dispatch_mutex_);
++    dispatch_queue_.push_back(std::move(callback));
++  }
++  dispatch_cond_.notify_all();
++}
++
+ bool KernelState::Save(ByteStream* stream) {
+   XELOGD("Serializing the kernel...");
+   stream->Write(kKernelSaveSignature);
+diff --git a/src/xenia/kernel/kernel_state.h b/src/xenia/kernel/kernel_state.h
+--- a/src/xenia/kernel/kernel_state.h
++++ b/src/xenia/kernel/kernel_state.h
+@@ -336,6 +336,8 @@
+       uint32_t overlapped_ptr, std::function<void()> pre_callback = nullptr,
+       std::function<void()> post_callback = nullptr);
+ 
++  void QueueHostDispatch(std::function<void()> callback);
++
+   bool Save(ByteStream* stream);
+   bool Restore(ByteStream* stream);
+ 
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+@@ -19,6 +19,7 @@
+ #include <string>
+ 
+ #include "xenia/base/math.h"
++#include "xenia/base/threading.h"
+ #include "xenia/cpu/lzx.h"
+ #include "xenia/cpu/processor.h"
+ #include "xenia/kernel/util/shim_utils.h"
+@@ -453,82 +454,115 @@
+   const uint32_t request_guest = device_ptr.guest_address();
+   const uint32_t context_guest = device_ptr->info.context_ptr;
+   KernelState* const state = kernel_state();
+-  std::array<uint8_t, 8 * MicCapture::kBytesPerFrame> audio{};
+-  if (result == X_STATUS_SUCCESS && frames) {
+-    uint32_t peak = 0;
+-    if (capture.Read(frames, audio, &peak)) {
+-      std::memcpy(state->memory()->TranslateVirtual(buffer_guest), audio.data(),
+-                  frames * MicCapture::kBytesPerFrame);
+-      if (request_count <= 4 || (request_count & 1023) == 0) {
+-        XELOGI("XMic: data frames={} peak={}", frames, peak);
+-      }
+-    } else {
+-      result = X_STATUS_UNSUCCESSFUL;
+-      if (request_count <= 4 || (request_count & 1023) == 0) {
+-        XELOGW("XMic: capture timed out");
+-      }
+-    }
+-  }
+-
+-  uint32_t statuses_guest = 0;
+-  uint32_t lengths_guest = 0;
+-  if (frames) {
+-    statuses_guest = state->memory()->SystemHeapAlloc(frames * 4);
+-    lengths_guest = state->memory()->SystemHeapAlloc(frames * 2);
+-    if (!statuses_guest || !lengths_guest) {
+-      result = X_STATUS_NO_MEMORY;
+-    } else {
+-      auto statuses =
+-          state->memory()->TranslateVirtual<xe::be<uint32_t>*>(statuses_guest);
+-      auto lengths =
+-          state->memory()->TranslateVirtual<xe::be<uint16_t>*>(lengths_guest);
+-      for (uint32_t i = 0; i < frames; ++i) {
+-        statuses[i] = result;
+-        lengths[i] =
+-            result == X_STATUS_SUCCESS ? MicCapture::kBytesPerFrame : 0;
+-      }
+-    }
+-  }
+-  uint64_t args[] = {request_guest, static_cast<uint32_t>(result),
+-                     statuses_guest, lengths_guest};
+-  // The XMic library's completion routine resumes its request on this guest
+-  // thread; its saved registers and stack must still belong to that request.
+-  const uint64_t completion_result = state->processor()->Execute(
+-      XThread::GetCurrentThread()->thread_state(), callback, args,
+-      xe::countof(args));
+-  if (request_count <= 4 || (frames && (request_count & 1023) == 0)) {
+-    XELOGI("XMic: completion request={} result={:08X} callback_return={:08X}",
+-           request_index, static_cast<uint32_t>(result),
+-           static_cast<uint32_t>(completion_result));
+-  }
+-  // The XMic library keeps the caller's frame-length array in its request
+-  // context. Check the first few completed transfers without reading audio.
+-  if (frames && request_count <= 4 && context_guest + 0x30 == request_guest) {
+-    const uint32_t field_guest = context_guest + 0x20;
+-    auto* field_heap = state->memory()->LookupHeap(field_guest);
+-    if (field_heap &&
+-        field_heap->QueryRangeAccess(field_guest, field_guest + 3) !=
+-            xe::memory::PageAccess::kNoAccess) {
+-      const uint32_t caller_lengths_guest =
+-          state->memory()->TranslateVirtual<xe::be<uint32_t>*>(field_guest)->get();
+-      auto* lengths_heap = state->memory()->LookupHeap(caller_lengths_guest);
+-      if (lengths_heap && caller_lengths_guest <= UINT32_MAX - frames * 2 &&
+-          lengths_heap->QueryRangeAccess(caller_lengths_guest,
+-                                         caller_lengths_guest + frames * 2 - 1) !=
++  MicCapture* const capture_ptr = &capture;
++  auto complete = [state, capture_ptr, request_guest, context_guest, callback,
++                   request_index, request_count, frames, buffer_guest,
++                   result]() mutable {
++    std::array<uint8_t, 8 * MicCapture::kBytesPerFrame> audio{};
++    if (result == X_STATUS_SUCCESS && frames) {
++      uint32_t peak = 0;
++      if (capture_ptr->Read(frames, audio, &peak)) {
++        std::memcpy(state->memory()->TranslateVirtual(buffer_guest),
++                    audio.data(), frames * MicCapture::kBytesPerFrame);
++        if (request_count <= 4 || (request_count & 1023) == 0) {
++          XELOGI("XMic: data frames={} peak={}", frames, peak);
++        }
++      } else {
++        result = X_STATUS_UNSUCCESSFUL;
++        if (request_count <= 4 || (request_count & 1023) == 0) {
++          XELOGW("XMic: capture timed out");
++        }
++      }
++    }
++
++    uint32_t statuses_guest = 0;
++    uint32_t lengths_guest = 0;
++    if (frames) {
++      statuses_guest = state->memory()->SystemHeapAlloc(frames * 4);
++      lengths_guest = state->memory()->SystemHeapAlloc(frames * 2);
++      if (!statuses_guest || !lengths_guest) {
++        result = X_STATUS_NO_MEMORY;
++      } else {
++        auto statuses = state->memory()->TranslateVirtual<xe::be<uint32_t>*>(
++            statuses_guest);
++        auto lengths =
++            state->memory()->TranslateVirtual<xe::be<uint16_t>*>(lengths_guest);
++        for (uint32_t i = 0; i < frames; ++i) {
++          statuses[i] = result;
++          lengths[i] =
++              result == X_STATUS_SUCCESS ? MicCapture::kBytesPerFrame : 0;
++        }
++      }
++    }
++    uint64_t args[] = {request_guest, static_cast<uint32_t>(result),
++                       statuses_guest, lengths_guest};
++    // Complete using a guest thread state so the XMic callback can run its
++    // guest code and signal the request's overlapped object.
++    const uint64_t completion_result =
++        state->processor()->Execute(XThread::GetCurrentThread()->thread_state(),
++                                    callback, args, xe::countof(args));
++    if (request_count <= 4 || (frames && (request_count & 1023) == 0)) {
++      XELOGI("XMic: completion request={} result={:08X} callback_return={:08X}",
++             request_index, static_cast<uint32_t>(result),
++             static_cast<uint32_t>(completion_result));
++    }
++    // The XMic library keeps the caller's frame-length array in its request
++    // context. Check the first few completed transfers without reading audio.
++    if (frames && request_count <= 4 && context_guest + 0x30 == request_guest) {
++      const uint32_t field_guest = context_guest + 0x20;
++      auto* field_heap = state->memory()->LookupHeap(field_guest);
++      if (field_heap &&
++          field_heap->QueryRangeAccess(field_guest, field_guest + 3) !=
+               xe::memory::PageAccess::kNoAccess) {
+-        auto* caller_lengths = state->memory()->TranslateVirtual<
+-            xe::be<uint16_t>*>(caller_lengths_guest);
+-        XELOGI("XMic: caller frame lengths first={} second={}",
+-               caller_lengths[0].get(),
+-               frames > 1 ? caller_lengths[1].get() : 0);
+-      }
+-    }
+-  }
+-  if (statuses_guest) {
+-    state->memory()->SystemHeapFree(statuses_guest);
+-  }
+-  if (lengths_guest) {
+-    state->memory()->SystemHeapFree(lengths_guest);
++        const uint32_t caller_lengths_guest =
++            state->memory()
++                ->TranslateVirtual<xe::be<uint32_t>*>(field_guest)
++                ->get();
++        auto* lengths_heap = state->memory()->LookupHeap(caller_lengths_guest);
++        if (lengths_heap && caller_lengths_guest <= UINT32_MAX - frames * 2 &&
++            lengths_heap->QueryRangeAccess(
++                caller_lengths_guest, caller_lengths_guest + frames * 2 - 1) !=
++                xe::memory::PageAccess::kNoAccess) {
++          auto* caller_lengths =
++              state->memory()->TranslateVirtual<xe::be<uint16_t>*>(
++                  caller_lengths_guest);
++          XELOGI("XMic: caller frame lengths first={} second={}",
++                 caller_lengths[0].get(),
++                 frames > 1 ? caller_lengths[1].get() : 0);
++        }
++      }
++    }
++    if (statuses_guest) {
++      state->memory()->SystemHeapFree(statuses_guest);
++    }
++    if (lengths_guest) {
++      state->memory()->SystemHeapFree(lengths_guest);
++    }
++  };
++
++  // A stack-backed request needs completion on its caller's guest thread.
++  // Heap-backed data requests may outlive this call. Complete those on the
++  // kernel dispatch thread so XMic can finish linking the pending transfer
++  // before its callback runs. This also matches the hardware's asynchronous
++  // data transfer without a title-specific path.
++  XThread* const thread = XThread::GetCurrentThread();
++  const auto on_caller_stack = [thread](uint32_t address) {
++    return address >= thread->stack_limit() &&
++           address < thread->stack_base();
++  };
++  if (request_type == XMicRequestType::MicGetData &&
++      !on_caller_stack(request_guest) && !on_caller_stack(context_guest) &&
++      !on_caller_stack(buffer_guest)) {
++    if (request_count <= 4) {
++      XELOGI("XMic: deferred heap-backed data request {:08X}",
++             request_guest);
++    }
++    state->QueueHostDispatch([complete = std::move(complete)]() mutable {
++      xe::threading::Sleep(std::chrono::milliseconds(1));
++      complete();
++    });
++  } else {
++    complete();
+   }
+   return X_STATUS_PENDING;
+ }

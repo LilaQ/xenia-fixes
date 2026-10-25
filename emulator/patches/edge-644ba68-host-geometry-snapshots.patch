@@ -1,0 +1,190 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -74,6 +74,14 @@
+             "when neither report queries nor VIZ surveys consume coverage.",
+             "GPU");
+ 
++DEFINE_bool(d3d12_mirror_host_geometry, false,
++            "Copy exported geometry inputs into device memory before consuming "
++            "them instead of fetching vertex data from imported guest RAM.", "GPU");
++
++DEFINE_bool(d3d12_split_geometry_copy_fence, false,
++            "Submit new geometry snapshots before their consuming draws, so "
++            "the guest-RAM lifetime fence covers the copies only.", "GPU");
++
+ DEFINE_bool(evil_within_async_feedback, false,
+             "425307F4 only: use a completed CPU-feedback resolve up to "
+             "four frames old rather than stall the CPU. Other readbacks stay "
+@@ -743,6 +751,20 @@
+   if (!shared_memory_->Initialize()) {
+     XELOGE("Failed to initialize shared memory");
+     return false;
++  }
++
++  if (cvars::d3d12_mirror_host_geometry) {
++    mirrored_geometry_watch_ = shared_memory_->RegisterGlobalWatch(
++        [](const global_unique_lock_type&, void* context, uint32_t first,
++           uint32_t last, bool) {
++          auto* cp = static_cast<D3D12CommandProcessor*>(context);
++          first = std::min(first, SharedMemory::kBufferSize - 1) >> 12;
++          last = std::min(last, SharedMemory::kBufferSize - 1) >> 12;
++          for (uint32_t page = first; page <= last; ++page) {
++            cp->mirrored_geometry_pages_[page >> 6] &=
++                ~(uint64_t(1) << (page & 63));
++          }
++        }, this);
+   }
+ 
+   // Read-watch consumption tracking for resolves.
+@@ -1606,6 +1628,11 @@
+ 
+   render_target_cache_.reset();
+ 
++  if (shared_memory_ && mirrored_geometry_watch_) {
++    shared_memory_->UnregisterGlobalWatch(mirrored_geometry_watch_);
++    mirrored_geometry_watch_ = nullptr;
++  }
++  mirrored_geometry_pages_.fill(0);
+   shared_memory_.reset();
+ 
+   deferred_command_list_.Reset();
+@@ -2484,10 +2511,33 @@
+ }
+ 
+ bool D3D12CommandProcessor::EnsureMemexportRangeInDeviceBuffer(
+-    uint32_t base_bytes, uint32_t size_bytes, bool whole_range) {
++    uint32_t base_bytes, uint32_t size_bytes, bool whole_range,
++    bool reuse_geometry_copy) {
++  auto lock = global_critical_region::Acquire();
+   if (!cvars::memexport_enable || shared_memory_->GetHostBuffer() == nullptr ||
+       !GatherMemexportCopyRuns(base_bytes, size_bytes, whole_range)) {
+     return false;
++  }
++  if (reuse_geometry_copy) {
++    mirrored_geometry_runs_.clear();
++    for (const auto& run : memexport_copy_runs_) {
++      const uint32_t end_page = (run.first + run.second - 1) >> 12;
++      for (uint32_t page = run.first >> 12; page <= end_page; ++page) {
++        const uint64_t bit = uint64_t(1) << (page & 63);
++        if (mirrored_geometry_pages_[page >> 6] & bit) continue;
++        mirrored_geometry_pages_[page >> 6] |= bit;
++        const uint32_t base = page << 12;
++        if (!mirrored_geometry_runs_.empty() &&
++            mirrored_geometry_runs_.back().first +
++                mirrored_geometry_runs_.back().second == base) {
++          mirrored_geometry_runs_.back().second += 4096;
++        } else {
++          mirrored_geometry_runs_.emplace_back(base, 4096);
++        }
++      }
++    }
++    memexport_copy_runs_.swap(mirrored_geometry_runs_);
++    if (memexport_copy_runs_.empty()) return true;
+   }
+   // Transition the host buffer to a copy source (ordering the memexport writes,
+   // which may have run several draws ago, before the read) and the device
+@@ -2501,6 +2551,13 @@
+     deferred_command_list_.D3DCopyBufferRegion(
+         shared_memory_->GetBuffer(), run.first, shared_memory_->GetHostBuffer(),
+         run.first, run.second);
++  }
++  if (reuse_geometry_copy) ++mirrored_geometry_copy_generation_;
++  // Once the copy has completed, geometry consumers use immutable device
++  // memory. Their later draws must not extend the guest-RAM lifetime fence.
++  if (cvars::d3d12_await_host_buffer_reads && submission_open_) {
++    memexport_awaited_submission_ = GetCurrentSubmission();
++    memexport_await_pending_ = true;
+   }
+   return true;
+ }
+@@ -3223,6 +3280,10 @@
+                    uint32_t(sizeof(uint32_t)))) ||
+           VertexFetchInMemexportRange(regs, *vertex_shader)));
+   }
++
++  const bool mirror_host_geometry = cvars::d3d12_mirror_host_geometry &&
++      mirrored_geometry_watch_ && route_to_host && !memexport_used;
++  if (mirror_host_geometry) route_to_host = false;
+ 
+   reg::RB_DEPTHCONTROL normalized_depth_control =
+       draw_util::GetNormalizedDepthControl(regs);
+@@ -3544,6 +3605,8 @@
+     return false;
+   }
+   // Must not call anything that can change the descriptor heap from now on!
++
++  const uint64_t geometry_copy_generation = mirrored_geometry_copy_generation_;
+ 
+   // Ensure vertex buffers are resident.
+   // TODO(Triang3l): Cache residency for ranges in a way similar to how texture
+@@ -3619,7 +3682,35 @@
+           return false;
+         }
+       }
+-    }
++      if (mirror_host_geometry) {
++        for (uint32_t i = 0; i < vfetch_current_queued; ++i) {
++          EnsureMemexportRangeInDeviceBuffer(vfetch_addresses[i] << 2,
++                                             vfetch_sizes[i] << 2, false, true);
++        }
++      }
++    }
++  }
++  if (mirror_host_geometry && primitive_processing_result.index_buffer_type ==
++      PrimitiveProcessor::ProcessedIndexBufferType::kGuestDMA) {
++    EnsureMemexportRangeInDeviceBuffer(
++        primitive_processing_result.guest_index_base,
++        primitive_processing_result.guest_draw_vertex_count *
++            (primitive_processing_result.host_index_format ==
++                 xenos::IndexFormat::kInt16 ? 2u : 4u), false, true);
++  }
++  if (mirror_host_geometry && cvars::d3d12_split_geometry_copy_fence &&
++      !mirrored_geometry_retry_ &&
++      geometry_copy_generation != mirrored_geometry_copy_generation_) {
++    // No guest draw has been issued yet. Re-entering draws after the submission
++    // boundary rebuilds all command-list state, while cached snapshots avoid
++    // copying the same inputs again. A concurrent CPU write invalidates the
++    // cache; the bounded retry then keeps its ordinary full-submission fence.
++    if (!EndSubmission(false)) return false;
++    mirrored_geometry_retry_ = true;
++    const bool result = IssueDraw(primitive_type, index_count, index_buffer_info,
++                                 major_mode_explicit);
++    mirrored_geometry_retry_ = false;
++    return result;
+   }
+   // Ensure the heaps for the memexport ranges are resident, and also load the
+   // data surrounding the export and to fill the regions that won't be modified
+@@ -4725,6 +4816,7 @@
+ 
+       render_target_cache_->ClearCache();
+ 
++      mirrored_geometry_pages_.fill(0);
+       shared_memory_->ClearCache();
+     }
+   }
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -254,7 +254,8 @@
+   // Returns whether it copied, so an upload of the same range can be skipped.
+   bool EnsureMemexportRangeInDeviceBuffer(uint32_t base_bytes,
+                                           uint32_t size_bytes,
+-                                          bool whole_range = false);
++                                          bool whole_range = false,
++                                          bool reuse_geometry_copy = false);
+ 
+   // Returns a pipeline with deferred creation by its handle. May return nullptr
+   // if failed to create the pipeline.
+@@ -726,6 +727,13 @@
+   bool xenos_sample_positions_used_ = false;
+ 
+   std::unique_ptr<D3D12SharedMemory> shared_memory_;
++  uint64_t mirrored_geometry_copy_generation_ = 0;
++  bool mirrored_geometry_retry_ = false;
++  SharedMemory::GlobalWatchHandle mirrored_geometry_watch_ = nullptr;
++  std::array<uint64_t, (SharedMemory::kBufferSize >> 12) / 64>
++      mirrored_geometry_pages_{};
++  std::vector<std::pair<uint32_t, uint32_t>> mirrored_geometry_runs_;
++
+ 
+   std::unique_ptr<D3D12RenderTargetCache> render_target_cache_;
+ 

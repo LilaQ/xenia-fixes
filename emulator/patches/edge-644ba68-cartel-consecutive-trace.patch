@@ -1,0 +1,71 @@
+--- a/src/xenia/gpu/command_processor.h
++++ b/src/xenia/gpu/command_processor.h
+@@ -709,6 +709,8 @@
+   // Full path of the frame trace currently being written, so the reference
+   // screenshot can be saved beside it when the frame closes.
+   std::filesystem::path trace_frame_file_path_;
++  uint32_t trace_frames_remaining_ = 0;
++  uint32_t trace_frame_index_ = 0;
+ 
+   std::atomic<bool> worker_running_;
+   kernel::object_ref<kernel::XHostThread> worker_thread_;
+--- a/src/xenia/gpu/command_processor.cc
++++ b/src/xenia/gpu/command_processor.cc
+@@ -143,6 +143,11 @@
+     "on "
+     "Vulkan, SV_Barycentrics on Direct3D 12).",
+     "GPU");
++
++DEFINE_uint32(trace_gpu_frame_count, 1,
++              "Consecutive GPU frames recorded by one F4 request (1-60). "
++              "The recording stops at a complete frame after reaching 768 MiB.",
++              "GPU.Debug");
+ 
+ namespace xe {
+ namespace gpu {
+@@ -297,6 +302,8 @@
+     XELOGE("Frame trace already pending; ignoring.");
+     return;
+   }
++  trace_frames_remaining_ = std::clamp(cvars::trace_gpu_frame_count, 1u, 60u);
++  trace_frame_index_ = 0;
+   trace_state_ = TraceState::kSingleFrame;
+   trace_frame_path_ = root_path;
+ }
+--- a/src/xenia/gpu/pm4_command_processor_implement.h
++++ b/src/xenia/gpu/pm4_command_processor_implement.h
+@@ -692,9 +692,32 @@
+         trace_writer_.WriteEvent(EventCommand::Type::kSwap);
+         trace_writer_.Flush();
+         if (trace_state_ == TraceState::kSingleFrame) {
+-          trace_state_ = TraceState::kDisabled;
+-          trace_writer_.Close();
++          // Keep one trace open across adjacent swaps so no rendered frame
++          // can be skipped by UI/request polling or capture completion waits.
++          const auto trace_path = trace_frame_file_path_;
++          auto image_path = trace_path;
++          if (trace_frames_remaining_ > 1 || trace_frame_index_) {
++            image_path.replace_extension();
++            image_path += fmt::format("_frame{:04d}.xtr", trace_frame_index_);
++          }
++          trace_frame_file_path_ = image_path;
+           WriteTraceFrameScreenshot();
++          trace_frame_file_path_ = trace_path;
++          ++trace_frame_index_;
++          --trace_frames_remaining_;
++          std::error_code trace_size_error;
++          const auto trace_size =
++              std::filesystem::file_size(trace_path, trace_size_error);
++          const bool trace_budget_reached =
++              !trace_size_error && trace_size >= 768ull * 1024 * 1024;
++          if (!trace_frames_remaining_ || trace_budget_reached) {
++            trace_state_ = TraceState::kDisabled;
++            trace_writer_.Close();
++            trace_frame_file_path_.clear();
++            XELOGI("Consecutive GPU trace complete: {} frames{}",
++                   trace_frame_index_,
++                   trace_budget_reached ? " (storage limit)" : "");
++          }
+         } else if (trace_state_ == TraceState::kDisabled) {
+           trace_writer_.Close();
+         }

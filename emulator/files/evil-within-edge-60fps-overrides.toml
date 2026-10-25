@@ -1,0 +1,14 @@
+# Use with matching 08E87EF28DE9084B patch; saves remain in Canary content.
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+occlusion_query = "fake"
+framerate_limit = 60
+guest_display_refresh_cap = false
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[General]
+apply_patches = true
+time_scalar = 1

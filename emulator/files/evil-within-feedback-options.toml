@@ -1,0 +1,29 @@
+# Merge into this game's existing Edge configuration, preserving profile,
+# installed content, save paths and controller selection.
+# Requires the dedicated 644ba68 + Evil Within feedback source patch build.
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+occlusion_query = "fake"
+framerate_limit = 60
+guest_display_refresh_cap = false
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+enable_host_buffer = true
+shared_memory_zero_copy = false
+memexport_await_pixel_exports = true
+memexport_await_vertex_exports = false
+direct_host_resolve = true
+submit_on_primary_buffer_end = true
+d3d12_resolve_readback_prefetch = true
+evil_within_async_feedback = true
+evil_within_batch_feedback = true
+d3d12_reuse_mip_variant_base = true
+d3d12_shared_memory_combined_reads = true
+
+[Display]
+fullscreen = true
+
+[UI]
+show_achievement_notification = true

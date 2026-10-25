@@ -1,0 +1,30 @@
+# BC2 PAL, title 454108A8, Game.xex module C1F8A2BE5BCF6B96.
+# Apply to both per-game config and title override so saved UI values do not win.
+# Keep original profiles, Canary content root, audio decoder and protect_zero.
+# Native Xenon config unlock is generated separately by tools/bc2-native-fps.py.
+[GPU]
+gpu = "d3d12"
+render_target_path = "accuracy"
+readback_resolve = true
+framerate_limit = 60
+guest_display_refresh_cap = true
+occlusion_query = "fast"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Kernel]
+# Cooperative scheduler watchdog stalled at frame 14001 during checkpoint.
+# Use host threads for this title; checkpoint completion needs runtime confirmation.
+guest_scheduler = false
+
+[General]
+time_scalar = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[UI]
+show_achievement_notification = true

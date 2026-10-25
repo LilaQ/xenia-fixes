@@ -1,0 +1,29 @@
+title_name = "Spider-Man: Edge of Time"
+title_id = "415608B2"
+hash = "26011A843A5386C6"
+# Default.xex, media 13B1B679, base version 0.0.0.2, no title update.
+
+[[patch]]
+name = "60 FPS presentation interval"
+desc = "Change the game's two-vblank presentation interval to one. The current comparison uses Canary vsync=false, framerate_limit=0 and normal time_scalar=1, retaining the native 1/60-second frame timer. Simulation timing and GameLogic.dll are unchanged; sustained 60 FPS is not yet verified."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x8210C264
+value = 0x39200001 # li r9,1 (original: li r9,2 / 0x39200002)
+# Stored at object+0x70, the +0x34 PresentationInterval of the parameters at
+# object+0x3C passed to CreateDevice. r9 is overwritten immediately afterward.
+
+[[patch]]
+name = "Full-rate object updates"
+desc = "Do not skip a visible object's update when its update-LOD gate returns 0x20: return the ordinary 0x10 tick instead. Preserve the original cull result 0x40, accumulated time, side effects and simulation time scale. Can increase CPU work; requires gameplay verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x820DC5E4
+value = 0x38600010 # li r3,0x10 (original: li r3,0x20 / 0x38600020)
+# The same skip-to-tick policy is used by EdgeOfTimeRecomp's default
+# eot_UpdateGate_Tick hook (src/gpu/patches/update_rate.cpp, eot_update_lod=false).
+# https://github.com/goliathret/EdgeOfTimeRecomp/blob/main/src/gpu/patches/update_rate.cpp

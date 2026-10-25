@@ -1,0 +1,238 @@
+--- a/src/xenia/gpu/texture_cache.h
++++ b/src/xenia/gpu/texture_cache.h
+@@ -314,6 +314,13 @@
+     bool base_outdated_lockless() const { return base_outdated_; }
+     bool mips_outdated_lockless() const { return mips_outdated_; }
+     bool MakeUpToDateAndWatch(const global_unique_lock_type& global_lock);
++    // Non-packed mip levels can be invalidated and uploaded independently.
++    // Returns true only when tracking is newly enabled (first upload is full).
++    bool EnableMipLevelTracking();
++    uint32_t GetOutdatedMipLevels();
++    uint32_t GetOutdatedMipSlices(uint32_t level);
++    void MipLevelWatchCallback(const global_unique_lock_type& global_lock,
++                               uint32_t level, uint32_t slice);
+ 
+     void WatchCallback(const global_unique_lock_type& global_lock, bool is_mip);
+ 
+@@ -365,6 +372,11 @@
+     bool base_outdated_ = false;
+     // Whether the recent mip data needs reloading from the memory.
+     bool mips_outdated_ = false;
++    bool mip_level_tracking_ = false;
++    uint32_t mip_levels_outdated_ = 0;
++    std::array<uint8_t, xenos::kTextureMaxMips> mip_slices_outdated_{};
++    std::array<SharedMemory::WatchHandle, xenos::kTextureMaxMips * 6>
++        mip_level_watch_handles_{};
+     // Watch handles for the memory ranges.
+     SharedMemory::WatchHandle base_watch_handle_ = nullptr;
+     SharedMemory::WatchHandle mips_watch_handle_ = nullptr;
+@@ -724,6 +736,10 @@
+  private:
+   void UpdateTexturesTotalHostMemoryUsage(uint64_t add, uint64_t subtract);
+ 
++  static void MipLevelWatchCallback(const global_unique_lock_type& global_lock,
++                                   void* context, void* data, uint64_t argument,
++                                   bool invalidated_by_gpu);
++
+   // Shared memory callback for texture data invalidation.
+   static void WatchCallback(const global_unique_lock_type& global_lock,
+                             void* context, void* data, uint64_t argument,
+--- a/src/xenia/gpu/texture_cache.cc
++++ b/src/xenia/gpu/texture_cache.cc
+@@ -682,6 +682,11 @@
+ }
+ 
+ TextureCache::Texture::~Texture() {
++  for (auto handle : mip_level_watch_handles_) {
++    if (handle) {
++      texture_cache().shared_memory().UnwatchMemoryRange(handle);
++    }
++  }
+   if (mips_watch_handle_) {
+     texture_cache().shared_memory().UnwatchMemoryRange(mips_watch_handle_);
+   }
+@@ -733,11 +738,87 @@
+   if (watch_mips) {
+     assert_not_zero(GetGuestMipsSize());
+     mips_outdated_ = false;
+-    mips_watch_handle_ = shared_memory.WatchMemoryRange(
+-        key().mip_page << 12, GetGuestMipsSize(), TextureCache::WatchCallback,
+-        this, nullptr, 1);
++    if (mip_level_tracking_) {
++      for (uint32_t level = 1; level <= key().mip_max_level; ++level) {
++        const auto& layout = guest_layout().mips[level];
++        for (uint32_t slice = 0; slice < 6; ++slice) {
++          uint32_t index = level * 6 + slice;
++          if (!mip_level_watch_handles_[index]) {
++            uint32_t offset = slice * layout.array_slice_stride_bytes;
++            mip_level_watch_handles_[index] = shared_memory.WatchMemoryRange(
++                (key().mip_page << 12) +
++                    guest_layout().mip_offsets_bytes[level] + offset,
++                std::min(layout.array_slice_stride_bytes,
++                         layout.level_data_extent_bytes - offset),
++                TextureCache::MipLevelWatchCallback, this, nullptr, index);
++          }
++        }
++        mip_slices_outdated_[level] = 0;
++      }
++      mip_levels_outdated_ = 0;
++    } else {
++      mips_watch_handle_ = shared_memory.WatchMemoryRange(
++          key().mip_page << 12, GetGuestMipsSize(), TextureCache::WatchCallback,
++          this, nullptr, 1);
++    }
+   }
+   return true;
++}
++
++bool TextureCache::Texture::EnableMipLevelTracking() {
++  auto lock = texture_cache_.global_critical_region_.Acquire();
++  if (mip_level_tracking_ || mips_watch_handle_ || key().packed_mips ||
++      !key().mip_max_level || key().mip_max_level >= xenos::kTextureMaxMips ||
++      !GetGuestMipsSize()) {
++    return false;
++  }
++  if (key().dimension != xenos::DataDimension::kCube ||
++      key().GetDepthOrArraySize() != 6) {
++    return false;
++  }
++  for (uint32_t level = 1; level <= key().mip_max_level; ++level) {
++    const auto& layout = guest_layout().mips[level];
++    if (!layout.array_slice_stride_bytes ||
++        layout.level_data_extent_bytes <= 5 * layout.array_slice_stride_bytes) {
++      return false;
++    }
++  }
++  mip_level_tracking_ = true;
++  mip_slices_outdated_.fill(0x3F);
++  mip_levels_outdated_ = (uint32_t(1) << (key().mip_max_level + 1)) - 2;
++  mips_outdated_ = true;
++  return true;
++}
++
++uint32_t TextureCache::Texture::GetOutdatedMipLevels() {
++  auto lock = texture_cache_.global_critical_region_.Acquire();
++  return mip_level_tracking_ ? mip_levels_outdated_ : UINT32_MAX;
++}
++
++uint32_t TextureCache::Texture::GetOutdatedMipSlices(uint32_t level) {
++  auto lock = texture_cache_.global_critical_region_.Acquire();
++  return mip_level_tracking_ ? mip_slices_outdated_[level] : UINT32_MAX;
++}
++
++void TextureCache::Texture::MipLevelWatchCallback(
++    const global_unique_lock_type& global_lock, uint32_t level, uint32_t slice) {
++  assert_true(global_lock.owns_lock());
++  assert_true(slice < 6);
++  assert_true(level && level <= key().mip_max_level);
++  mip_levels_outdated_ |= uint32_t(1) << level;
++  mip_slices_outdated_[level] |= uint8_t(1) << slice;
++  mips_outdated_ = true;
++  mip_level_watch_handles_[level * 6 + slice] = nullptr;
++}
++
++void TextureCache::MipLevelWatchCallback(
++    const global_unique_lock_type& global_lock, void* context, void* data,
++    uint64_t argument, bool invalidated_by_gpu) {
++  auto& texture = *static_cast<Texture*>(context);
++  texture.MipLevelWatchCallback(global_lock, uint32_t(argument) / 6,
++                                uint32_t(argument) % 6);
++  texture.texture_cache().texture_became_outdated_.store(
++      true, std::memory_order_release);
+ }
+ 
+ void TextureCache::Texture::MarkAsUsed() {
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -27,6 +27,13 @@
+ #include "xenia/gpu/xenos.h"
+ #include "xenia/ui/d3d12/d3d12_upload_buffer_pool.h"
+ #include "xenia/ui/d3d12/d3d12_util.h"
++
++DECLARE_bool(log_texture_loads);
++
++DEFINE_bool(d3d12_partial_cube_mips, false,
++            "Track dirty non-packed reflection-cube mip levels independently; "
++            "only the validated 128x128 RGBA16 six-face layout is eligible.",
++            "D3D12");
+ 
+ namespace xe {
+ namespace gpu {
+@@ -1595,6 +1602,30 @@
+   SCOPE_profile_cpu_f("gpu");
+   D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
+   TextureKey texture_key = d3d12_texture.key();
++  uint32_t mip_upload_mask = UINT32_MAX;
++  std::array<uint32_t, xenos::kTextureMaxMips> mip_slice_masks;
++  mip_slice_masks.fill(UINT32_MAX);
++  if (cvars::d3d12_partial_cube_mips && !texture_key.scaled_resolve &&
++      !texture_key.packed_mips && texture_key.tiled &&
++      texture_key.GetWidth() == 128 && texture_key.GetHeight() == 128 &&
++      texture_key.GetDepthOrArraySize() == 6 &&
++      texture_key.dimension == xenos::DataDimension::kCube &&
++      texture_key.format == xenos::TextureFormat::k_16_16_16_16 &&
++      texture_key.mip_max_level == 6) {
++    if (d3d12_texture.EnableMipLevelTracking()) {
++      load_mips = true;
++    }
++    mip_upload_mask = d3d12_texture.GetOutdatedMipLevels();
++    for (uint32_t level = 1; level <= texture_key.mip_max_level; ++level) {
++      mip_slice_masks[level] = d3d12_texture.GetOutdatedMipSlices(level);
++    }
++    if (cvars::log_texture_loads) {
++      XELOGI("partial_cube_mips: dirty mask {:08X}, base {}, mips {}, slices {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
++             mip_upload_mask, load_base, load_mips, mip_slice_masks[1],
++             mip_slice_masks[2], mip_slice_masks[3], mip_slice_masks[4],
++             mip_slice_masks[5], mip_slice_masks[6]);
++    }
++  }
+ 
+   DeferredCommandList& command_list =
+       command_processor_.GetDeferredCommandList();
+@@ -1812,6 +1843,9 @@
+        ++loop_level) {
+     bool is_base = loop_level == 0;
+     uint32_t level = (level_packed == 0) ? 0 : loop_level;
++    if (!is_base && !(mip_upload_mask & (uint32_t(1) << level))) {
++      continue;
++    }
+ 
+     uint32_t guest_address =
+         (is_base ? texture_key.base_page : texture_key.mip_page) << 12;
+@@ -1902,6 +1936,12 @@
+         level_guest_layout.array_slice_stride_bytes *
+         (texture_resolution_scale_x * texture_resolution_scale_y);
+     for (uint32_t slice = 0; slice < array_size; ++slice) {
++      if (!is_base && mip_slice_masks[level] != UINT32_MAX &&
++          !(mip_slice_masks[level] & (uint32_t(1) << slice))) {
++        load_constants.guest_offset += level_array_slice_stride_bytes_scaled;
++        load_constants.host_offset += host_slice_size;
++        continue;
++      }
+       if (slice != 0) {
+         command_list.D3DSetComputeRoot32BitConstants(
+             0, sizeof(load_constants.guest_offset) / sizeof(uint32_t),
+@@ -1950,6 +1990,9 @@
+   location_dest.pResource = texture_resource;
+   location_dest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+   for (uint32_t level = level_first; level <= level_last; ++level) {
++    if (level && !(mip_upload_mask & (uint32_t(1) << level))) {
++      continue;
++    }
+     uint32_t guest_level = std::min(level, level_packed);
+     location_source.PlacedFootprint =
+         level ? host_slice_layouts_mips[guest_level] : host_slice_layout_base;
+@@ -2014,8 +2057,11 @@
+       }
+     }
+     for (uint32_t slice = 0; slice < array_size; ++slice) {
+-      command_list.D3DCopyTextureRegion(&location_dest, 0, 0, 0,
+-                                        &location_source, source_box_ptr);
++      if (!level || mip_slice_masks[level] == UINT32_MAX ||
++          (mip_slice_masks[level] & (uint32_t(1) << slice))) {
++        command_list.D3DCopyTextureRegion(&location_dest, 0, 0, 0,
++                                          &location_source, source_box_ptr);
++      }
+       location_dest.SubresourceIndex += texture_level_count;
+       location_source.PlacedFootprint.Offset += host_slice_size;
+     }

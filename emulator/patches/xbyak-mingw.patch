@@ -1,0 +1,15 @@
+diff --git a/xbyak/xbyak_util.h b/xbyak/xbyak_util.h
+index 3cee6c1..616e0b0 100644
+--- a/xbyak/xbyak_util.h
++++ b/xbyak/xbyak_util.h
+@@ -421,7 +421,9 @@ public:
+ 	static inline void getCpuidEx(uint32_t eaxIn, uint32_t ecxIn, uint32_t data[4])
+ 	{
+ #ifdef XBYAK_INTEL_CPU_SPECIFIC
+-	#ifdef _WIN32
++	#if defined(__MINGW32__)
++		__asm__ __volatile__("cpuid" : "=a"(data[0]), "=b"(data[1]), "=c"(data[2]), "=d"(data[3]) : "0"(eaxIn), "2"(ecxIn));
++	#elif defined(_WIN32)
+ 		__cpuidex(reinterpret_cast<int*>(data), eaxIn, ecxIn);
+ 	#else
+ 		__cpuid_count(eaxIn, ecxIn, data[0], data[1], data[2], data[3]);

@@ -1,0 +1,9 @@
+*.log
+library.json
+settings.json
+upstream.json
+optimized-settings.json
+Backups/
+update-*/
+.test-*/
+__pycache__/

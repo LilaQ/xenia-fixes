@@ -1,0 +1,64 @@
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -1700,6 +1700,12 @@
+     return false;
+   }
+   LogTextureLoad(texture_key, load_shader, load_base, load_mips);
++  auto begin_upload_phase = [&](uint32_t phase) {
++    return command_processor_.BeginTextureLoadTiming(
++        texture_key.base_page << 12, texture_key.mip_page << 12,
++        texture_key.GetWidth(), texture_key.GetHeight(),
++        uint32_t(texture_key.format) | (phase << 16));
++  };
+   bool texture_resolution_scaled = texture_key.scaled_resolve;
+   ID3D12PipelineState* pipeline =
+       texture_resolution_scaled ? load_pipelines_scaled_[load_shader].Get()
+@@ -1714,6 +1720,7 @@
+   // range across first. A no-op for normal textures and non-memexport ranges.
+   // Scaled-resolve textures read from separate scaled buffers, not shared
+   // memory, so they are unaffected.
++  uint32_t source_phase = begin_upload_phase(1);
+   if (!texture_resolution_scaled) {
+     if (load_base) {
+       uint32_t source_base = texture_key.base_page << 12;
+@@ -1735,6 +1742,8 @@
+           texture_key.mip_page << 12, d3d12_texture.GetGuestMipsSize());
+     }
+   }
++
++  command_processor_.EndTransferTiming(source_phase);
+ 
+   // Get the guest layout.
+   const texture_util::TextureGuestLayout& guest_layout =
+@@ -1881,6 +1890,7 @@
+     return false;
+   }
+ 
++  uint32_t untiling_phase = begin_upload_phase(2);
+   command_processor_.SetExternalPipeline(pipeline);
+   command_list.D3DSetComputeRootSignature(load_root_signature_.Get());
+   command_list.D3DSetComputeRootUnorderedAccessView(
+@@ -2047,6 +2057,10 @@
+       load_constants.host_offset += host_slice_size;
+     }
+   }
++
++  command_processor_.EndTransferTiming(untiling_phase);
++  TextureTimingScope copy_phase_scope{command_processor_,
++                                      begin_upload_phase(3)};
+ 
+   // Update LRU caching because the texture will be used by the command list.
+   d3d12_texture.MarkAsUsed();
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -4734,8 +4734,9 @@
+                                                     texture_sums.end());
+   std::sort(texture_sorted.begin(), texture_sorted.end(),
+             [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
+-  for (size_t i = 0; i < std::min(texture_sorted.size(), size_t(16)); ++i) {
++  for (size_t i = 0; i < texture_sorted.size(); ++i) {
+     const auto& [key, value] = texture_sorted[i];
++    if (i >= 16 && !(std::get<3>(key) >> 16)) continue;
+     XELOGI("GPU texture timing: base {:08X}, mips {:08X}, {}x{}, format {}: {:.3f} ms in {} uploads",
+            std::get<0>(key), std::get<1>(key), std::get<2>(key) & 65535,
+            std::get<2>(key) >> 16, std::get<3>(key), value.first, value.second);

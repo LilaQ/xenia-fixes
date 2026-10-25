@@ -1,0 +1,10 @@
+# Use with the matching enabled 08E87EF28DE9084B FPS patch.
+# Preserve full readback and fake occlusion from the existing game config.
+
+[GPU]
+vsync = false
+framerate_limit = 60
+
+[General]
+apply_patches = true
+time_scalar = 1

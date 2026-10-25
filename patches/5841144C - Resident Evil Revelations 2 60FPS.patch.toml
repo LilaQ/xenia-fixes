@@ -1,0 +1,17 @@
+title_name = "Resident Evil Revelations 2"
+title_id = "5841144C"
+hash = "9FBE98182B30938E"
+
+[[patch]]
+    name = "60 FPS - explicit render limit"
+    desc = "Load the original 60.0 constant as the variable render limiter. Preserve the existing simulation base and elapsed-time calculation. Use vsync=false and framerate_limit=0 in Canary. Fixed-timestep modes are unchanged."
+    author = "LilaQ"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x82F38E38
+        value = 0x3D208202
+
+    [[patch.be32]]
+        address = 0x82F38E3C
+        value = 0xC18966C4

@@ -1,0 +1,29 @@
+title_name = "Saints Row: The Third: The Full Package"
+title_id = "5451086D"
+hash = "F514A8ECF18C0E5A"
+
+[[patch]]
+name = "Single-sample 720p scene"
+desc = "Version 0.0.4.3 only: use the native full-frame, single-sample 720p scene layout instead of the two-tile 2x MSAA layout. Preserves native image dimensions and unrelated presentation flags. Use FXAA for output anti-aliasing."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x82D3E610
+value = 0x39400000
+
+[[patch.be32]]
+address = 0x82D3E614
+value = 0x915F000C
+
+[[patch.be32]]
+address = 0x82E7C254
+value = 0x00000000
+
+[[patch.be32]]
+address = 0x82E7C260
+value = 0x00000001
+
+[[patch.be32]]
+address = 0x82E7C270
+value = 0x00000500

@@ -1,0 +1,19 @@
+title_name = "Max Payne 3"
+title_id = "5454086B"
+hash = "B203CBE51BCF3D72"
+
+[[patch]]
+ name = "60 FPS"
+ desc = "Set the game renderer and the shared CPU frame-wait interval to one vblank. The CPU wait reads 830DC0F8 and computes interval / 60 - 0.003 seconds; real-time simulation timing is unchanged. Base version 00000006. Requires readback for visible gameplay."
+ author = "LilaQ"
+ is_enabled = true
+
+ # Explicit renderer setup request.
+ [[patch.be32]]
+  address = 0x8229BD94
+  value = 0x38600001
+
+ # Shared interval read by CPU frame wait (821EE8B8) and later renderer startup (821EF11C).
+ [[patch.be32]]
+  address = 0x830DC0F8
+  value = 0x00000001

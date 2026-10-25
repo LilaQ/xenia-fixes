@@ -1,0 +1,11 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -131,7 +131,7 @@
+ option(SPIRV_BUILD_TESTS "Build targets for the SPIR-V unit tests." OFF)
+ 
+ # Enable SPIR-V CodeGen for Linux by default.
+-if(NOT WIN32)
++if(NOT WIN32 AND NOT APPLE)
+   set(ENABLE_SPIRV_CODEGEN ON)
+ endif()
+ 

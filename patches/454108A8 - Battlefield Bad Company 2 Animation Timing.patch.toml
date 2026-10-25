@@ -1,0 +1,19 @@
+title_name = "Battlefield: Bad Company 2"
+title_id = "454108A8"
+hash = "C1F8A2BE5BCF6B96"
+
+[[patch]]
+name = "Variable-frame animation root motion"
+is_enabled = true
+# The animation buffer consumer discarded movement when accumulated duration
+# was below 0.02 s. At 60 FPS its normal 1/60 s step fails that validity check.
+# Use the engine's existing 1e-6 s epsilon at this call site only.
+# No mission/trigger edits, shared-constant edits, or simulation-speed changes.
+
+[[patch.be32]]
+address = 0x82E36A10
+value = 0x3D6082A0
+
+[[patch.be32]]
+address = 0x82E36A14
+value = 0xC1AB0D58

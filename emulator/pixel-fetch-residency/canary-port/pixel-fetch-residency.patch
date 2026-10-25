@@ -1,0 +1,21 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -2951,6 +2951,8 @@
+   // validity is tracked.
+   const Shader::ConstantRegisterMap& constant_map_vertex =
+       vertex_shader->constant_register_map();
++  const Shader::ConstantRegisterMap* constant_map_pixel =
++      pixel_shader ? &pixel_shader->constant_register_map() : nullptr;
+   {
+     uint32_t vfetch_addresses[96];
+     uint32_t vfetch_sizes[96];
+@@ -2959,6 +2961,9 @@
+          i < xe::countof(constant_map_vertex.vertex_fetch_bitmap); ++i) {
+       uint32_t vfetch_bits_remaining =
+           constant_map_vertex.vertex_fetch_bitmap[i];
++      if (constant_map_pixel) {
++        vfetch_bits_remaining |= constant_map_pixel->vertex_fetch_bitmap[i];
++      }
+       uint32_t j;
+       while (xe::bit_scan_forward(vfetch_bits_remaining, &j)) {
+         vfetch_bits_remaining = xe::clear_lowest_bit(vfetch_bits_remaining);

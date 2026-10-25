@@ -1,0 +1,53 @@
+title_name = "Need for Speed: Rivals (TU2 render-only experiment)"
+title_id = "454109C6"
+hash = "3946E30942DCAF32"
+
+[[patch]]
+name = "Variable rendering with original simulation (experimental)"
+desc = "Keep original simulation and physics clocks. Enable visual interpolation and raise only the variable-render ceiling to 120; requires host presentation limit 60. Not yet validated as a stable 60 FPS fix."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x88374824
+value = 0x492C351C
+
+[[patch.be32]]
+address = 0x89637D40
+value = 0x39600001
+
+[[patch.be32]]
+address = 0x89637D44
+value = 0x996300A6
+
+[[patch.be32]]
+address = 0x89637D48
+value = 0x39600000
+
+[[patch.be32]]
+address = 0x89637D4C
+value = 0x996300A5
+
+[[patch.be32]]
+address = 0x89637D50
+value = 0x3D608980
+
+[[patch.be32]]
+address = 0x89637D54
+value = 0x816BFB94
+
+[[patch.be32]]
+address = 0x89637D58
+value = 0x3D8042F0
+
+[[patch.be32]]
+address = 0x89637D5C
+value = 0x918B0024
+
+[[patch.be32]]
+address = 0x89637D60
+value = 0x897F0010
+
+[[patch.be32]]
+address = 0x89637D64
+value = 0x4AD3CAC4

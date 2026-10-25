@@ -1,0 +1,31 @@
+title_name = "Silent Hill 2 HD"
+title_id = "4B4E0845"
+hash = "F3CA6A39460AF335"
+# Media 625FCB0C, base version 00000005.
+
+[[patch]]
+    name = "60 FPS presentation interval"
+    desc = "Changes D3D presentation from two refresh intervals to one. Keep display at 60 Hz and time_scalar at 1. Gameplay and cutscene timing need an interactive check."
+    author = "Local cabinet patch"
+    is_enabled = true
+    [[patch.be32]]
+        address = 0x822366C0 # li r11,2; D3DPRESENT_PARAMETERS + 0x34
+        value = 0x39600001 # li r11,1; original 0x39600002
+
+[[patch]]
+    name = "Direct-start New Voices"
+    desc = "Sets the launcher's voice flag explicitly, independent of pending launch data. Zero uses original XMA files; one selects the .new files. Use an isolated patch root for each voice variant."
+    author = "Local cabinet patch"
+    is_enabled = true
+    [[patch.be32]]
+        address = 0x820CA140
+        value = 0x3D408288
+    [[patch.be32]]
+        address = 0x820CA144
+        value = 0x39600001
+    [[patch.be32]]
+        address = 0x820CA148
+        value = 0x996AE330
+    [[patch.be32]]
+        address = 0x820CA14C
+        value = 0x4800001C

@@ -1,0 +1,4 @@
+# Apply to every Xbox 360 Mic title's per-game Xenia Edge config. Four queued
+# 5.33 ms audio pumps are the lowest value accepted by this build.
+[APU]
+apu_max_queued_frames = 4

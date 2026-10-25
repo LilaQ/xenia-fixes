@@ -1,0 +1,6 @@
+__pycache__/
+*.xex
+*.pe
+*.iso
+*.log
+*.bin

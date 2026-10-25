@@ -1,0 +1,25 @@
+title_name = "L.A. Noire: The Complete Edition"
+title_id = "5454086C"
+hash = "60E4E421F4445C2B"
+# Disc 1-4 share this executable image. Media ID 52F99F1B on Disc 1.
+# Timer getter 0x827709D8 calculates divisor / display refresh rate.
+# Constructor and gameplay restore set divisor=2; menu uses divisor=1.
+# Experimental Xbox 360 implementation, not a port of PC patch addresses.
+
+[[patch]]
+name = "60 FPS Gameplay Timer"
+desc = "Sets the gameplay frame divisor to 1 and requests interval 1. Simulation timestep is derived from the same divisor. Gameplay, driving and mission progression require testing."
+author = "LilaQ / Codex"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x827748C8
+value = 0x38A00001 # li r5,1 instead of li r5,2 in timer constructor
+
+[[patch.be32]]
+address = 0x828A4898
+value = 0x38800001 # li r4,1 instead of li r4,2 in gameplay restore
+
+[[patch.be32]]
+address = 0x828A489C
+value = 0x909E0004 # stw r4,4(r30), preserving r31=2 and unrelated field +0xC4

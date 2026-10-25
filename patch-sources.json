@@ -1,0 +1,190 @@
+[
+  {
+    "path": "patches/415607E2 - Spider-Man 3 60FPS.patch.toml",
+    "source": "emulator/game-patches/415607E2 - Spider-Man 3 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/41560881 - Shattered Dimensions 60FPS.patch.toml",
+    "source": "emulator/game-patches/41560881 - Shattered Dimensions 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/415608B2 - Edge of Time 60FPS.patch.toml",
+    "source": "emulator/game-patches/415608B2 - Edge of Time 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/425307D1 - Oblivion GOTY TU3 60FPS.patch.toml",
+    "source": "emulator/game-patches/425307D1 - Oblivion GOTY TU3 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/425307E0 - Fallout New Vegas Ultimate 60FPS.patch.toml",
+    "source": "emulator/game-patches/425307E0 - Fallout New Vegas Ultimate 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/425307F4 - The Evil Within 60FPS (base).patch.toml",
+    "source": "emulator/game-patches/425307F4 - The Evil Within 60FPS (base).patch.toml"
+  },
+  {
+    "path": "patches/454107DF - BFME II 60FPS.patch.toml",
+    "source": "emulator/game-patches/454107DF - BFME II 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/45410852 - The Lord of the Rings Conquest 60FPS.patch.toml",
+    "source": "emulator/game-patches/45410852 - The Lord of the Rings Conquest 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/454108B4 - Need for Speed Shift 60FPS.patch.toml",
+    "source": "emulator/game-patches/454108B4 - Need for Speed Shift 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/45410934 - Shift 2 Unleashed 60FPS.patch.toml",
+    "source": "emulator/game-patches/45410934 - Shift 2 Unleashed 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/4541094A - The Run 60FPS.patch.toml",
+    "source": "emulator/game-patches/4541094A - The Run 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/454109C6 - Need for Speed Rivals TU2 variable rendering.patch.toml",
+    "source": "emulator/game-patches/454109C6 - Need for Speed Rivals TU2 variable rendering.patch.toml"
+  },
+  {
+    "path": "patches/4B4D07F6 - SR4 Single-sample Scene.patch.toml",
+    "source": "emulator/game-patches/4B4D07F6 - SR4 Single-sample Scene.patch.toml"
+  },
+  {
+    "path": "patches/4B4D0800 - Gat Single-sample Scene.patch.toml",
+    "source": "emulator/game-patches/4B4D0800 - Gat Single-sample Scene.patch.toml"
+  },
+  {
+    "path": "patches/4C4107D2 - The Force Unleashed 60FPS.patch.toml",
+    "source": "emulator/game-patches/4C4107D2 - The Force Unleashed 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/4C4107F2 - The Force Unleashed II 60FPS.patch.toml",
+    "source": "emulator/game-patches/4C4107F2 - The Force Unleashed II 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/4D5308D6 - Fable III 60FPS.patch.toml",
+    "source": "emulator/game-patches/4D5308D6 - Fable III 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/5451086D - SR3 Single-sample Scene.patch.toml",
+    "source": "emulator/game-patches/5451086D - SR3 Single-sample Scene.patch.toml"
+  },
+  {
+    "path": "patches/5454082B - Red Dead Redemption GOTY TU1 Disc 1 60FPS.patch.toml",
+    "source": "emulator/game-patches/5454082B - Red Dead Redemption GOTY TU1 Disc 1 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/454108A8 - Battlefield Bad Company 2 Animation Timing.patch.toml",
+    "source": "emulator/patches/454108A8 - Battlefield Bad Company 2 Animation Timing.patch.toml"
+  },
+  {
+    "path": "patches/454108A8 - Battlefield Bad Company 2 Timing.patch.toml",
+    "source": "emulator/patches/454108A8 - Battlefield Bad Company 2 Timing.patch.toml"
+  },
+  {
+    "path": "patches/454109AB - Army of Two The Devils Cartel Timing.patch.toml",
+    "source": "emulator/patches/454109AB - Army of Two The Devils Cartel Timing.patch.toml"
+  },
+  {
+    "path": "patches/545407D8 - BioShock Ultimate Rapture 60 FPS.patch.toml",
+    "source": "emulator/patches/545407D8 - BioShock Ultimate Rapture 60 FPS.patch.toml"
+  },
+  {
+    "path": "patches/Rivals-render-test.patch.toml",
+    "source": "emulator/tools/Rivals-render-test.patch.toml"
+  },
+  {
+    "path": "patches/534307DB - Hitman Blood Money HD 60FPS.patch.toml",
+    "source": "games/hitman-hd/patches/534307DB - Hitman Blood Money HD 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/5351081C - Hitman 2 Silent Assassin HD 60FPS.patch.toml",
+    "source": "games/hitman-hd/patches/5351081C - Hitman 2 Silent Assassin HD 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/5351081C - Hitman Contracts HD 60FPS.patch.toml",
+    "source": "games/hitman-hd/patches/5351081C - Hitman Contracts HD 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/534307E7 - Just Cause 2 TU0 60FPS.patch.toml",
+    "source": "games/just-cause/534307E7 - Just Cause 2 TU0 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/534307E7 - Just Cause 2 TU0 Required Streaming.patch.toml",
+    "source": "games/just-cause/534307E7 - Just Cause 2 TU0 Required Streaming.patch.toml"
+  },
+  {
+    "path": "patches/534307E7 - Just Cause 2 TU1 60FPS.patch.toml",
+    "source": "games/just-cause/534307E7 - Just Cause 2 TU1 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/5454086C - LA Noire Complete Edition 60FPS.patch.toml",
+    "source": "games/la-noire/5454086C - LA Noire Complete Edition 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/545407E6 - Mafia II Frame Pacing 60FPS.patch.toml",
+    "source": "games/mafia-ii/545407E6 - Mafia II Frame Pacing 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/5454086B - Max Payne 3 60FPS.patch.toml",
+    "source": "games/max-payne-3/5454086B - Max Payne 3 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/454107F6 - Medal of Honor Airborne 60FPS.patch.toml",
+    "source": "games/medal-of-honor-airborne/454107F6 - Medal of Honor Airborne 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/45410993 - Medal of Honor Warfighter 60FPS.patch.toml",
+    "source": "games/medal-of-honor-warfighter/45410993 - Medal of Honor Warfighter 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/434307D4 - Resident Evil 5 60FPS.patch.toml",
+    "source": "games/resident-evil-5/434307D4 - Resident Evil 5 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/43430819 - Resident Evil 6 60FPS.patch.toml",
+    "source": "games/resident-evil-6/43430819 - Resident Evil 6 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/43430833 - Resident Evil Revelations 60FPS.patch.toml",
+    "source": "games/resident-evil-revelations/43430833 - Resident Evil Revelations 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/5841144C - Resident Evil Revelations 2 60FPS.patch.toml",
+    "source": "games/resident-evil-revelations-2/5841144C - Resident Evil Revelations 2 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/45410869 - Rock Band 2 SEH Boot Fix.patch.toml",
+    "source": "games/rock-band-2/45410869 - Rock Band 2 SEH Boot Fix.patch.toml"
+  },
+  {
+    "path": "patches/4B4E07E5 - Silent Hill Homecoming 60FPS.patch.toml",
+    "source": "games/silent-hill/patches/4B4E07E5 - Silent Hill Homecoming 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/4B4E0845 - Silent Hill 2 HD New Voices.patch.toml",
+    "source": "games/silent-hill/patches/4B4E0845 - Silent Hill 2 HD New Voices.patch.toml"
+  },
+  {
+    "path": "patches/4B4E0845 - Silent Hill 2 HD Original Voices.patch.toml",
+    "source": "games/silent-hill/patches/4B4E0845 - Silent Hill 2 HD Original Voices.patch.toml"
+  },
+  {
+    "path": "patches/4B4E0845 - Silent Hill 3 HD 60FPS.patch.toml",
+    "source": "games/silent-hill/patches/4B4E0845 - Silent Hill 3 HD 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/415607DE - Wolfenstein Singleplayer 60FPS.patch.toml",
+    "source": "games/wolfenstein/415607DE - Wolfenstein Singleplayer 60FPS.patch.toml"
+  },
+  {
+    "path": "patches/58410AFD - Worms Ultimate Mayhem 60FPS Timing.patch.toml",
+    "source": "games/worms-ultimate-mayhem/58410AFD - Worms Ultimate Mayhem 60FPS Timing.patch.toml"
+  },
+  {
+    "path": "patches/58411249 - XXL RuntimeHost.patch.toml",
+    "source": "games/xxl/58411249 - XXL RuntimeHost.patch.toml"
+  }
+]

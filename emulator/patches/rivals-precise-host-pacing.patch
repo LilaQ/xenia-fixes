@@ -1,0 +1,139 @@
+--- a/src/xenia/gpu/command_processor.cc
++++ b/src/xenia/gpu/command_processor.cc
+@@ -52,6 +52,13 @@
+     "Only does anything in debug builds, if set will log the pseudo-stacktrace "
+     "of the guest thread that wrote the new read position.",
+     "Logging");
++
++DEFINE_bool(
++    host_frame_pacing_precise, false,
++    "On Windows, leave a 2 ms spin tail before host presentation deadlines "
++    "rather than issuing sub-millisecond kernel sleeps. Trades a short CPU "
++    "spin for steadier frame pacing; guest clocks are unchanged.",
++    "GPU");
+ 
+ DEFINE_bool(clear_memory_page_state, false,
+             "Refresh state of memory pages to enable gpu written data. "
+@@ -465,11 +472,16 @@
+ 
+     const double remaining_ms = target_duration_ms - elapsed_ms;
+ #if XE_PLATFORM_WIN32
+-    // Sleep 90% of remaining, spin the rest for accuracy
+-    const uint64_t sleep_ns =
+-        static_cast<uint64_t>(remaining_ms * 1000000.0 * 0.90);
++    // NtDelayExecution is quantized even after requesting the finest timer
++    // resolution. A sub-millisecond sleep may cross the next frame deadline.
++    // Keep the bounded final interval awake when precise pacing is requested.
++    const uint64_t sleep_ns = cvars::host_frame_pacing_precise
++        ? static_cast<uint64_t>(std::max(0.0, remaining_ms - 2.0) * 1000000.0)
++        : static_cast<uint64_t>(remaining_ms * 1000000.0 * 0.90);
+     if (sleep_ns > 0) {
+       xe::threading::NanoSleep(sleep_ns);
++    } else if (cvars::host_frame_pacing_precise) {
++      xe::SpinPause();
+     }
+ #elif XE_PLATFORM_MAC
+     // Darwin's nanosleep oversleeps by 100-500us; NanoSleepPrecise spins the
+--- a/src/xenia/gpu/command_processor.h
++++ b/src/xenia/gpu/command_processor.h
+@@ -184,9 +184,10 @@
+                          uint32_t frontbuffer_height) {}
+ 
+   // Throttle presentation based on framerate_limit cvar.
+-  // Called after IssueSwap to limit host frame rate without affecting guest
+-  // vblank timing.
++  // Called at the backend image handoff, or after IssueSwap as a fallback,
++  // to limit host frame rate independently of guest vblank timing.
+   void ThrottlePresentation();
++  virtual bool IsHostFramePacedAtPresent() const { return false; }
+ 
+   // May be called not only from the command processor thread when the command
+   // processor is paused, and the termination of this function may be explicitly
+--- a/src/xenia/gpu/gpu_flags.h
++++ b/src/xenia/gpu/gpu_flags.h
+@@ -19,6 +19,7 @@
+ DECLARE_bool(guest_display_refresh_cap);
+ 
+ DECLARE_uint32(framerate_limit);
++DECLARE_bool(host_frame_pacing_precise);
+ 
+ void SetGuestDisplayRefreshCap(bool value);
+ void SetFramerateLimit(uint32_t value);
+--- a/src/xenia/gpu/pm4_command_processor_implement.h
++++ b/src/xenia/gpu/pm4_command_processor_implement.h
+@@ -812,7 +812,11 @@
+   logging::IncrementFrameNumber();
+ 
+   // Apply host frame rate limiting (separate from guest vblank timing)
+-  COMMAND_PROCESSOR::ThrottlePresentation();
++  // A backend may pace after submitting render work, immediately before
++  // handing its image to the presenter. Do not throttle that frame twice.
++  if (!COMMAND_PROCESSOR::IsHostFramePacedAtPresent()) {
++    COMMAND_PROCESSOR::ThrottlePresentation();
++  }
+ 
+   return true;
+ }
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -371,6 +371,7 @@
+ 
+   void IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbuffer_width,
+                  uint32_t frontbuffer_height) override;
++  bool IsHostFramePacedAtPresent() const override;
+ 
+   void OnPrimaryBufferEnd() override;
+ 
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -2074,6 +2074,14 @@
+   gamma_ramp_pwl_up_to_date_ = false;
+ }
+ 
++bool D3D12CommandProcessor::IsHostFramePacedAtPresent() const {
++#if XE_PLATFORM_WIN32
++  return cvars::host_frame_pacing_precise;
++#else
++  return false;
++#endif
++}
++
+ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
+                                       uint32_t frontbuffer_width,
+                                       uint32_t frontbuffer_height) {
+@@ -2109,11 +2117,12 @@
+ 
+   auto aspect = graphics_system_->GetScaledAspectRatio();
+ 
++  bool presentation_paced = false;
+   presenter->RefreshGuestOutput(
+       uint32_t(swap_texture_desc.Width), uint32_t(swap_texture_desc.Height),
+       aspect.first, aspect.second,
+       [this, &swap_texture_srv_desc, frontbuffer_format, swap_texture_resource,
+-       &swap_texture_desc](
++       &swap_texture_desc, &presentation_paced](
+           ui::Presenter::GuestOutputRefreshContext& context) -> bool {
+         const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+         ID3D12Device* device = provider.GetDevice();
+@@ -2431,12 +2440,21 @@
+         // queue.
+         SubmitBarriers();
+         EndSubmission(true);
++        if (IsHostFramePacedAtPresent()) {
++          // The GPU can execute the submitted frame during this wait. Pace
++          // the image handoff itself rather than the next frame's start.
++          ThrottlePresentation();
++          presentation_paced = true;
++        }
+         return true;
+       });
+ 
+   // End the frame even if did not present for any reason (the image refresher
+   // was not called), to prevent leaking per-frame resources.
+   EndSubmission(true);
++  if (!presentation_paced && IsHostFramePacedAtPresent()) {
++    ThrottlePresentation();
++  }
+   struct SwapTiming {
+     std::array<double, 240> calls{};
+     std::array<double, 240> intervals{};

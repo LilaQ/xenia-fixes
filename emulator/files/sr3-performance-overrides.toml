@@ -1,0 +1,33 @@
+# For the separate Edge build with d3d12_snorm16_multiply_scale.
+# Apply only with the SR3 build and matching version 0.0.4.3, title 5451086D.
+[D3D12]
+d3d12_snorm16_multiply_scale = true
+d3d12_skip_no_output_draws = true
+d3d12_stencil_plane_copy = true
+d3d12_stage_small_readback = true
+d3d12_sr3_async_hdr = true
+
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+depth_bias_shader_offset = true
+depth_float24_convert_in_pixel_shader = true
+depth_float24_round = true
+precise_interpolation = true
+readback_resolve = true
+occlusion_query = "strict"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+framerate_limit = 60
+guest_display_refresh_cap = false
+
+[GPU.Debug]
+snorm16_render_target_full_range = true
+
+[Display]
+fullscreen = true
+host_present_from_non_ui_thread = false
+postprocess_antialiasing = "fxaa"
+
+[Memory]
+protect_zero = false

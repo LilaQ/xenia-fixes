@@ -1,0 +1,8 @@
+This repository consolidates source fixes maintained by LilaQ and preserves existing component license notices. No blanket relicensing is performed.
+
+Xenia and source-derived patches: consult the BSD license and notices in the exact upstream revision listed by the corresponding build recipe. Existing source copyright headers remain in place.
+Pixel-fetch project: see emulator/pixel-fetch-residency/LICENSE.
+Rock Band 3 AES implementation: see games/rock-band-3/vendor/unlicense.txt.
+Avatar editor recompilation attribution/license: see emulator/licenses/AvatarEditorRecomp-CC0.txt.
+
+Game files, copyrighted game assets, keys, emulator binaries and private runtime captures are not distributed. Patch addresses and module hashes describe version compatibility, not ownership of the underlying game.

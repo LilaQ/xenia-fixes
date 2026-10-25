@@ -1,0 +1,44 @@
+# Merge these values into the installed Edge build's generated config.
+# Supply the existing content root and profile XUID when migrating from Canary.
+# Campaign CLI: --launch_module=scimitar_final.xex
+# Multiplayer disc CLI: --launch_module=ac3mp_e_360_f.xex
+# Keep the CLI-selected module rather than setting launch_module here.
+
+[Display]
+fullscreen = true
+
+[GPU]
+gpu = "d3d12"
+framerate_limit = 60
+guest_display_refresh_cap = false
+readback_resolve = false
+occlusion_query = "strict"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[CPU]
+enable_early_precompilation = false
+
+[Content]
+license_mask = 1
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[HID]
+hid = "sdl"
+
+[Storage]
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"
+cache_root = "D:/LaunchBox/Emulators/Xenia Edge/cache"
+content_root = "{{EXISTING_CONTENT_ROOT}}"
+
+[Profiles]
+logged_profile_slot_0_xuid = "{{EXISTING_PROFILE_XUID}}"
+
+[UI]
+show_achievement_notification = true
+
+# Also set [GPU].framerate_limit = 60 in config/555308AE.config.toml,
+# so a pre-existing title UI override cannot remove the cap.

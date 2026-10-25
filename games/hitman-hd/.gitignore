@@ -1,0 +1,7 @@
+__pycache__/
+*.xex
+*.pe
+*.iso
+*.log
+.venv/
+.DS_Store

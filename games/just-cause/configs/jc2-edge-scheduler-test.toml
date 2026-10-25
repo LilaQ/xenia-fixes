@@ -1,0 +1,7 @@
+# Merge these keys into the existing JC2 game config, retaining its other settings.
+# Diagnostic workaround for a spinning higher-priority thread on guest CPU 4.
+# This changes scheduling fairness; it requires an interactive loading test.
+[Kernel]
+guest_scheduler = true
+guest_scheduler_spin_quanta = 20
+guest_scheduler_stats = true

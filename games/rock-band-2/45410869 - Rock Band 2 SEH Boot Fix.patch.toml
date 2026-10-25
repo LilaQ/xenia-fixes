@@ -1,0 +1,17 @@
+title_name = "Rock Band 2"
+title_id = "45410869"
+hash = "B94DA74D17CDF26F"
+# PAL disc, Media ID 6FC0755E. Exact module hash only.
+# Adapted from Gliniak's Rock Band 3 SEH workaround:
+# https://github.com/xenia-canary/game-patches/blob/main/patches/45410914%20-%20Rock%20Band%203.patch.toml
+# RB2 diagnosis: https://github.com/xenia-canary/game-compatibility/issues/1032#issuecomment-4152611207
+
+[[patch]]
+    name = "Skip SEH null write at EA logo"
+    desc = "Invoke the registered exception filter through the existing CRT wrapper instead of deliberately writing to address zero. The filter restores the previous handler and enters the game's main loop. Exact PAL executable only."
+    author = "LilaQ; based on Gliniak's SEH workaround"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x821D0634
+        value = 0x484B4638

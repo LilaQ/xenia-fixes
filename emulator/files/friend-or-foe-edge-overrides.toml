@@ -1,0 +1,29 @@
+# Spider-Man: Friend or Foe, title 415607FA, media 3B914714, base 0.0.0.3.
+# Edge test after Canary booted to a black screen; gameplay is unverified.
+# Merge into the installed Edge configuration. Preserve the private account
+# slots from the game's Canary config; no account identifiers are distributed.
+# The shared content root retains the same profile and existing/future saves.
+[Console]
+use_50Hz_mode = false
+
+[GPU]
+gpu = "d3d12"
+guest_display_refresh_cap = true
+framerate_limit = 60
+readback_resolve = false
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Storage]
+content_root = "D:/LaunchBox/Emulators/Xenia Canary/content"
+storage_root = "D:/LaunchBox/Emulators/Xenia Edge"

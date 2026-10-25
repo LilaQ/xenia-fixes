@@ -1,0 +1,12 @@
+# Canary: installed PAL default.xex, hash 8F8CCB15050567C3.
+# Pair with the title/hash-matched one-vblank patch; gameplay verification required.
+[GPU]
+framerate_limit = 60
+vsync = true
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[UI]
+show_achievement_notification = true

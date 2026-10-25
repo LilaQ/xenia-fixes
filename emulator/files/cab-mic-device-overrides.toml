@@ -1,0 +1,4 @@
+# Automatic distinct capture endpoints for all Xbox 360 Mic games.
+[Kernel]
+mic_device_name = ""
+mic_device_name_2 = ""

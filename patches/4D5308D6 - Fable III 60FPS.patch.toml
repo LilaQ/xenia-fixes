@@ -1,0 +1,31 @@
+title_name = "Fable III"
+title_id = "4D5308D6"
+hash = "15A2B07FFF0A2754"
+
+[[patch]]
+    name = "60 FPS engine and presentation intervals"
+    desc = "Align engine startup, script setter and D3D interval to one refresh. Keep output capped at 60 FPS. Does not modify simulation time."
+    author = "Codex"
+    is_enabled = true
+
+    # D3D's interval-2 mapping: li r11, 2 -> li r11, 1.
+    [[patch.be32]]
+        address = 0x82D2767C
+        value = 0x39600001
+
+    # Engine startup: use interval 1 rather than the script-selected interval.
+    # Original: lwz r8, -0x12A0(r3). r8 is passed to the renderer initializer.
+    [[patch.be32]]
+        address = 0x822D8E1C
+        value = 0x39000001
+
+    # Default engine interval, originally 2.
+    [[patch.be32]]
+        address = 0x8329ED60
+        value = 0x00000001
+
+    # SetPresentationInterval is a void leaf setter. Keep the patched default
+    # instead of allowing scripts to restore interval 2; preserve function size.
+    [[patch.be32]]
+        address = 0x822DF258
+        value = 0x4E800020

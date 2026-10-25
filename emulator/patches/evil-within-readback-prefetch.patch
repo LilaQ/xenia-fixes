@@ -1,0 +1,893 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -26,6 +26,7 @@
+ #include "xenia/gpu/gpu_flags.h"
+ #include "xenia/gpu/packet_disassembler.h"
+ #include "xenia/gpu/registers.h"
++#include "xenia/gpu/resolve_feedback_guards.h"
+ #include "xenia/gpu/xenos.h"
+ #include "xenia/kernel/kernel_state.h"
+ #include "xenia/ui/d3d12/d3d12_presenter.h"
+@@ -48,6 +49,25 @@
+ DEFINE_bool(trace_swap_timing, false,
+             "Log 120-swap host cadence windows for isolated game testing.",
+             "GPU.Debug");
++
++DEFINE_bool(trace_readback_timing, false,
++            "Log bounded resolve CPU-fault copy timings for diagnosis.",
++            "GPU.Debug");
++
++DEFINE_bool(evil_within_async_feedback, false,
++            "425307F4 only: use a completed CPU-feedback resolve up to "
++            "four frames old rather than stall the CPU. Other readbacks stay "
++            "synchronous. May delay feedback consumers by a few frames.",
++            "GPU");
++
++DEFINE_bool(evil_within_batch_feedback, false,
++            "425307F4 only: batch asynchronous feedback resolves only when "
++            "bounded completed history can satisfy CPU readers.", "GPU");
++
++DEFINE_bool(d3d12_resolve_readback_prefetch, false,
++            "Stage small recently CPU-read resolves before later GPU work. "
++            "Preserves synchronous CPU visibility; default off.",
++            "GPU");
+ 
+ DECLARE_bool(clear_memory_page_state);
+ DECLARE_bool(d3d12_debug);
+@@ -146,6 +166,19 @@
+     return;
+   }
+   CommandProcessor::RequestFrameTrace(root_path);
++}
++
++bool D3D12CommandProcessor::TracePlaybackCanKeepMemory(
++    uint32_t base_ptr, uint32_t length) {
++  if (uint64_t(base_ptr) + length > SharedMemory::kBufferSize) return false;
++  const bool exported = IsMemexportRange(base_ptr, length);
++  const bool cpu_backed = shared_memory_->IsRangeNotGpuWritten(base_ptr, length);
++  if (base_ptr == 0x19E3A000 || base_ptr == 0x1B63A000 ||
++      base_ptr == 0x1AE3A000 || base_ptr == 0x1C63A000) {
++    XELOGI("TraceWarmEligibility base={:08X} length={} exported={} cpu_backed={}",
++           base_ptr, length, exported, cpu_backed);
++  }
++  return !exported && cpu_backed;
+ }
+ 
+ void D3D12CommandProcessor::TracePlaybackWroteMemory(uint32_t base_ptr,
+@@ -1447,6 +1480,7 @@
+   ResetMemexportPages();
+   memexport_staged_.clear();
+   ResetResolveReadWatch();
++  ClearResolvePrefetch();
+   DestroyResolveFaultCopy();
+ 
+   ShutdownQueryResources();
+@@ -2469,6 +2503,11 @@
+   if (ranges.empty()) {
+     return false;
+   }
++  if (TryPrefetchedResolveToGuestRam(ranges)) {
++    return true;
++  }
++  const uint64_t timing_start = cvars::trace_readback_timing
++      ? Clock::QueryHostTickCount() : 0;
+   const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+   ID3D12Device* device = provider.GetDevice();
+   if (!resolve_fault_command_list_) {
+@@ -2563,7 +2602,254 @@
+   if (staging) {
+     CopyPackedRangesToGuestRam(resolve_fault_readback_.mapped, ranges);
+   }
++  if (timing_start) {
++    const double ms = double(Clock::QueryHostTickCount() - timing_start) *
++        1000.0 / double(Clock::QueryHostTickFrequency());
++    static uint64_t timing_count = 0;
++    static double timing_sum_ms = 0;
++    static uint64_t timing_bytes = 0;
++    static uint32_t timing_slow_logs = 0;
++    uint64_t bytes = 0;
++    for (const auto& range : ranges) bytes += range.second;
++    ++timing_count;
++    timing_sum_ms += ms;
++    timing_bytes += bytes;
++    if (timing_count <= 16 || !(timing_count % 128) ||
++        (ms > 2.0 && timing_slow_logs++ < 256)) {
++      XELOGI("ResolveReadbackTiming n={} address={:08X} bytes={} ranges={} "
++             "ms={:.3f} total_ms={:.3f} total_bytes={} host={} zero_copy={}",
++             timing_count, ranges.front().first, bytes, ranges.size(), ms,
++             timing_sum_ms, timing_bytes,
++             shared_memory_->GetHostBuffer() != nullptr,
++             shared_memory_->is_zero_copy());
++    }
++  }
+   return true;
++}
++
++
++void D3D12CommandProcessor::PrefetchResolveForCpu(uint32_t address,
++                                                uint32_t length) {
++  if (!cvars::d3d12_resolve_readback_prefetch || !length || length > 65536 ||
++      shared_memory_->is_zero_copy()) {
++    return;
++  }
++  const uint64_t key = MakeReadbackResolveKey(address, length);
++  if (!ResolveReadRecently(key, false)) {
++    return;
++  }
++  const uint32_t start = address & ~uint32_t(4095);
++  const uint32_t size = ((address + length + 4095) & ~uint32_t(4095)) - start;
++  std::lock_guard<std::mutex> lock(resolve_read_mutex_);
++  auto owner_it = resolve_owners_.find(key);
++  if (owner_it == resolve_owners_.end() || owner_it->second.in_guest_ram ||
++      !owner_it->second.copyable) {
++    return;
++  }
++  auto entry_it = resolve_prefetch_.find(key);
++  if (entry_it == resolve_prefetch_.end()) {
++    if (resolve_prefetch_.size() >= 64) return;
++    entry_it = resolve_prefetch_.emplace(key, ResolvePrefetch{}).first;
++  }
++  auto& entry = entry_it->second;
++  const auto pitch = register_file_->Get<reg::RB_COPY_DEST_PITCH>();
++  const auto info = register_file_->Get<reg::RB_COPY_DEST_INFO>();
++  // Match only the four small CPU-feedback targets observed in the trace:
++  // three 32x128 floating-point planes and one 160x64 RGBA8 plane. Other
++  // targets and titles retain the synchronous path.
++  const bool feedback = cvars::evil_within_async_feedback &&
++      detail::IsEvilWithinTextureFeedback(kernel_state_->title_id(), length,
++          pitch.copy_dest_pitch, pitch.copy_dest_height,
++          uint32_t(info.copy_dest_format));
++  if (feedback && entry.buffer.resource && entry.serial) {
++    auto& history = resolve_feedback_history_[key];
++    history.push_back(std::move(entry));
++    entry = ResolvePrefetch{};
++    // Keep more staging versions than the allowed feedback age. Reusing a
++    // three-slot ring could remove the last completed snapshot when the GPU
++    // briefly fell behind, forcing a synchronous wait during camera pans.
++    if (history.size() >= 8) {
++      entry = std::move(history.front());
++      history.pop_front();
++    }
++  }
++  if (!entry.buffer.resource) {
++    if (!CreateReadbackStagingBuffer(entry.buffer, size)) return;
++    if (FAILED(GetD3D12Provider().GetDevice()->CreateFence(
++            0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&entry.fence)))) {
++      entry.buffer.resource->Unmap(0, nullptr);
++      entry.buffer.mapped = nullptr;
++      entry.buffer.resource.Reset();
++      return;
++    }
++    entry.address = start;
++    entry.length = size;
++  }
++  entry.feedback = feedback;
++  entry.frame = owner_it->second.frame;
++  entry.ready = false;
++  entry.serial = owner_it->second.serial;
++  entry.submission = GetCurrentSubmission();
++  ++entry.value;
++  shared_memory_->UseAsCopySource();
++  SubmitBarriers();
++  deferred_command_list_.D3DCopyBufferRegion(
++      entry.buffer.resource.Get(), 0, shared_memory_->GetBuffer(), start, size);
++  resolve_prefetch_pending_.push_back(key);
++  // Recently CPU-read resolves already request submission in NoteResolve.
++}
++
++// Caller holds resolve_read_mutex_. Never waits or touches guest memory.
++bool D3D12CommandProcessor::CanReadUnsubmittedResolveHistory(uint64_t key) const {
++  if (!cvars::evil_within_batch_feedback ||
++      !cvars::evil_within_async_feedback ||
++      !cvars::d3d12_resolve_readback_prefetch ||
++      kernel_state_->title_id() != 0x425307F4) return false;
++  const auto owner_it = resolve_owners_.find(key);
++  const auto current_it = resolve_prefetch_.find(key);
++  if (owner_it == resolve_owners_.end() ||
++      current_it == resolve_prefetch_.end()) return false;
++  const auto& owner = owner_it->second;
++  const auto& current = current_it->second;
++  // The current shape must have passed the exact feedback guards and its
++  // fresh copy must be queued. A stale key or failed allocation cannot batch.
++  if (!current.feedback || !current.buffer.resource ||
++      current.serial != owner.serial ||
++      current.submission != owner.submission) return false;
++  const auto usable = [&](const ResolvePrefetch& candidate) {
++    if (!candidate.feedback || !candidate.ready || !candidate.fence ||
++        !detail::FeedbackAgeAllowed(owner.serial, candidate.serial,
++                                    owner.frame, candidate.frame)) return false;
++    const uint64_t completed = candidate.fence->GetCompletedValue();
++    return completed != UINT64_MAX && completed >= candidate.value;
++  };
++  if (usable(current)) return true;
++  const auto history = resolve_feedback_history_.find(key);
++  if (history != resolve_feedback_history_.end()) {
++    for (const auto& previous : history->second) {
++      if (usable(previous)) return true;
++    }
++  }
++  return false;
++}
++
++void D3D12CommandProcessor::PublishResolvePrefetchFences(
++    ID3D12CommandQueue* queue) {
++  if (resolve_prefetch_pending_.empty()) {
++    return;
++  }
++  std::lock_guard<std::mutex> lock(resolve_read_mutex_);
++  for (uint64_t key : resolve_prefetch_pending_) {
++    auto& entry = resolve_prefetch_.at(key);
++    if (!entry.ready && SUCCEEDED(queue->Signal(entry.fence.Get(), entry.value))) {
++      entry.ready = true;
++    }
++  }
++  resolve_prefetch_pending_.clear();
++}
++
++// Called with resolve_read_mutex_ held, before a fallback copy is enqueued.
++bool D3D12CommandProcessor::TryPrefetchedResolveToGuestRam(
++    const std::vector<std::pair<uint32_t, uint32_t>>& ranges) {
++  if (!cvars::d3d12_resolve_readback_prefetch || ranges.empty()) {
++    return false;
++  }
++  const uint64_t key = resolve_page_owners_[ranges.front().first >> 12].load(
++      std::memory_order_relaxed);
++  auto entry_it = resolve_prefetch_.find(key);
++  auto owner_it = resolve_owners_.find(key);
++  if (entry_it == resolve_prefetch_.end() || owner_it == resolve_owners_.end()) {
++    return false;
++  }
++  auto* selected = &entry_it->second;
++  const auto& owner = owner_it->second;
++  bool completed_feedback = false;
++  if (selected->feedback && cvars::evil_within_async_feedback &&
++      kernel_state_->title_id() == 0x425307F4) {
++    ResolvePrefetch* newest = nullptr;
++    const auto consider = [&](ResolvePrefetch& candidate) {
++      if (candidate.feedback && candidate.ready &&
++          detail::FeedbackAgeAllowed(owner.serial, candidate.serial,
++                                     owner.frame, candidate.frame) &&
++          candidate.fence->GetCompletedValue() != UINT64_MAX &&
++          candidate.fence->GetCompletedValue() >= candidate.value &&
++          (!newest || candidate.serial > newest->serial)) {
++        newest = &candidate;
++      }
++    };
++    consider(*selected);
++    auto history = resolve_feedback_history_.find(key);
++    if (history != resolve_feedback_history_.end()) {
++      for (auto& previous : history->second) consider(previous);
++    }
++    if (newest) {
++      selected = newest;
++      completed_feedback = true;
++    }
++  }
++  auto& entry = *selected;
++  if (!entry.ready || (!completed_feedback &&
++      (entry.serial != owner.serial || entry.submission != owner.submission ||
++       entry.submission > GetResolveSubmittedThrough()))) {
++    return false;
++  }
++  for (const auto& range : ranges) {
++    if (range.first < entry.address ||
++        uint64_t(range.first) + range.second >
++            uint64_t(entry.address) + entry.length) {
++      return false;
++    }
++  }
++  const uint64_t start = cvars::trace_readback_timing
++      ? Clock::QueryHostTickCount() : 0;
++  // The fence was queued immediately after the resolve's command list. Unlike
++  // a fault-time queue signal, it cannot include unrelated later submissions.
++  if (!completed_feedback &&
++      FAILED(entry.fence->SetEventOnCompletion(entry.value, nullptr))) {
++    return false;
++  }
++  uint64_t bytes = 0;
++  for (const auto& range : ranges) {
++    std::memcpy(memory_->TranslatePhysical(range.first),
++                static_cast<uint8_t*>(entry.buffer.mapped) +
++                    (range.first - entry.address), range.second);
++    bytes += range.second;
++  }
++  if (start) {
++    static uint64_t count = 0, total_bytes = 0;
++    static double total_ms = 0;
++    static uint32_t slow_logs = 0;
++    const double ms = double(Clock::QueryHostTickCount() - start) * 1000.0 /
++                      double(Clock::QueryHostTickFrequency());
++    ++count;
++    total_ms += ms;
++    total_bytes += bytes;
++    if (count <= 16 || !(count % 128) ||
++        (ms > 2.0 && slow_logs++ < 256)) {
++      XELOGI("ResolvePrefetchTiming n={} address={:08X} bytes={} "
++             "ms={:.3f} total_ms={:.3f} total_bytes={} feedback={} age_frames={}",
++             count, ranges.front().first, bytes, ms, total_ms, total_bytes,
++             completed_feedback, owner.frame - entry.frame);
++    }
++  }
++  return true;
++}
++
++void D3D12CommandProcessor::ClearResolvePrefetch() {
++  // ShutdownContext has drained the queue and removed the access callbacks.
++  for (auto& entry : resolve_prefetch_) {
++    if (entry.second.buffer.mapped) {
++      entry.second.buffer.resource->Unmap(0, nullptr);
++    }
++  }
++  for (auto& history : resolve_feedback_history_) {
++    for (auto& previous : history.second) {
++      if (previous.buffer.mapped) previous.buffer.resource->Unmap(0, nullptr);
++    }
++  }
++  resolve_feedback_history_.clear();
++  resolve_prefetch_.clear();
++  resolve_prefetch_pending_.clear();
+ }
+ 
+ bool D3D12CommandProcessor::EnsureResolveFaultReadback(uint32_t size) {
+@@ -2659,6 +2945,11 @@
+       trace_draw_timing_frequency_) {
+     const auto* values =
+         static_cast<const uint64_t*>(trace_draw_timing_readback_.mapped);
++    struct FrameTiming {
++      uint64_t start = UINT64_MAX, end = 0;
++      double draw_us = 0, resolve_us = 0, transfer_us = 0, texture_us = 0;
++    };
++    std::unordered_map<uint64_t, FrameTiming> frame_timings;
+     double sum_us = 0;
+     for (uint32_t i = 0; i < trace_draw_timing_resolved_; ++i) {
+       if (values[i * 2 + 1] < values[i * 2]) {
+@@ -2667,14 +2958,29 @@
+       double us = double(values[i * 2 + 1] - values[i * 2]) * 1000000.0 /
+                   double(trace_draw_timing_frequency_);
+       const auto& row = trace_draw_timings_[i];
++      auto& frame = frame_timings[row.frame];
++      frame.start = std::min(frame.start, values[i * 2]);
++      frame.end = std::max(frame.end, values[i * 2 + 1]);
++      if (row.vertex_shader == UINT64_MAX) frame.resolve_us += us;
++      else if (row.vertex_shader == UINT64_MAX - 1) frame.transfer_us += us;
++      else if (row.vertex_shader == UINT64_MAX - 2) frame.texture_us += us;
++      else if (row.vertex_shader != UINT64_MAX - 3) frame.draw_us += us;
+       sum_us += us;
+       XELOGI("TraceDrawGPU index={} frame={} vs={:016X} ps={:016X} "
+              "vertices={} surface={:08X} us={:.3f}",
+              i, row.frame, row.vertex_shader, row.pixel_shader,
+              row.vertices, row.surface, us);
+     }
++    for (const auto& pair : frame_timings) {
++      const auto& frame = pair.second;
++      XELOGI("TraceFrameGPU frame={} span_us={:.3f} draw_us={:.3f} "
++             "resolve_us={:.3f} transfer_us={:.3f} texture_us={:.3f}", pair.first,
++             double(frame.end - frame.start) * 1000000.0 /
++                 double(trace_draw_timing_frequency_),
++             frame.draw_us, frame.resolve_us, frame.transfer_us, frame.texture_us);
++    }
+     XELOGI("TraceDrawGPU total_draws={} sum_draw_us={:.3f} "
+-           "(draw spans only; excludes copies/barriers/CPU waits; timing adds overhead)",
++           "(instrumented GPU scopes; excludes CPU waits and uninstrumented work; timing adds overhead)",
+            trace_draw_timing_resolved_, sum_us);
+   }
+   DestroyReadbackStagingBuffer(trace_draw_timing_readback_);
+@@ -2877,9 +3183,13 @@
+       regs, normalized_depth_control, normalized_color_mask, frame_current_);
+ 
+   // Set up the render targets - this may perform dispatches and draws.
+-  if (!render_target_cache_->Update(
+-          is_rasterization_done, normalized_depth_control,
+-          normalized_color_mask, *vertex_shader, window_offset_tiles)) {
++  const uint32_t transfer_timing = BeginTraceDrawTiming(
++      UINT64_MAX - 1, 0, 0, register_file_->values[XE_GPU_REG_RB_SURFACE_INFO]);
++  const bool targets_updated = render_target_cache_->Update(
++      is_rasterization_done, normalized_depth_control,
++      normalized_color_mask, *vertex_shader, window_offset_tiles);
++  EndTraceDrawTiming(transfer_timing);
++  if (!targets_updated) {
+     return false;
+   }
+   const char* stand_in_wait_reason =
+@@ -3016,7 +3326,10 @@
+       (pixel_shader != nullptr
+            ? pixel_shader->GetUsedTextureMaskAfterTranslation()
+            : 0);
++  const uint32_t texture_timing = BeginTraceDrawTiming(
++      UINT64_MAX - 2, 0, 0, used_texture_mask);
+   texture_cache_->RequestTextures(used_texture_mask);
++  EndTraceDrawTiming(texture_timing);
+ 
+   // Bind the pipeline after configuring it and doing everything that may bind
+   // other pipelines. For a placeholder, pin the concrete PSO instead of the
+@@ -3598,6 +3911,8 @@
+     PushDebugMarker("IssueCopy (Resolve)");
+   }
+ 
++  const uint32_t resolve_timing = BeginTraceDrawTiming(
++      UINT64_MAX, 0, 0, register_file_->values[XE_GPU_REG_RB_COPY_DEST_BASE]);
+   bool result;
+   if (!IsReadbackResolveEnabled()) {
+     uint32_t written_address, written_length;
+@@ -3618,6 +3933,7 @@
+     PopDebugMarker();
+   }
+ 
++  EndTraceDrawTiming(resolve_timing);
+   SubmitRequestedResolve();
+ 
+   return result;
+@@ -3836,7 +4152,29 @@
+       written_length = mirrored_length;
+     }
+   }
++  const bool submit_requested_before = resolve_submit_requested_;
+   NoteResolveForReadback(written_address, written_length, is_scaled);
++  if (!is_scaled) {
++    PrefetchResolveForCpu(written_address, written_length);
++    if (cvars::evil_within_batch_feedback) {
++      std::lock_guard<std::mutex> lock(resolve_read_mutex_);
++      if (CanReadUnsubmittedResolveHistory(
++              MakeReadbackResolveKey(written_address, written_length))) {
++        // Preserve unrelated pending submission requests. GPU synchronization
++        // packets, swaps, and cold/history-expired readbacks still submit.
++        const bool batched_request =
++            resolve_submit_requested_ && !submit_requested_before;
++        resolve_submit_requested_ = submit_requested_before;
++        if (batched_request) {
++          static uint64_t batched_count = 0;
++          if (++batched_count <= 4 || !(batched_count & 4095)) {
++            XELOGI("ResolveFeedbackBatch n={} address={:08X} bytes={}",
++                   batched_count, written_address, written_length);
++          }
++        }
++      }
++    }
++  }
+   return true;
+ }
+ 
+@@ -4171,6 +4509,7 @@
+       command_allocator_writable_last_ = nullptr;
+     }
+     completion_timeline_->SignalAndAdvance(direct_queue);
++    PublishResolvePrefetchFences(direct_queue);
+     resolve_submitted_through_.store(GetCurrentSubmission() - 1,
+                                      std::memory_order_release);
+     OnResolveSubmissionEnded();
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -86,6 +86,7 @@
+   void RequestFrameTrace(const std::filesystem::path& root_path) override;
+ 
+   void TracePlaybackWroteMemory(uint32_t base_ptr, uint32_t length) override;
++  bool TracePlaybackCanKeepMemory(uint32_t base_ptr, uint32_t length) override;
+ 
+   void RestoreEdramSnapshot(const void* snapshot) override;
+ 
+@@ -408,6 +409,27 @@
+     Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+     void* mapped = nullptr;
+   };
++  // Optional early copies of recently CPU-read small resolves. Never writes
++  // guest RAM asynchronously: the access fault validates the exact owner and
++  // waits only for the fence queued with that copy, then copies watched bytes.
++  struct ResolvePrefetch {
++    ReadbackStagingBuffer buffer;
++    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
++    uint32_t address = 0, length = 0;
++    uint64_t serial = 0, submission = 0, value = 0;
++    bool ready = false;
++    bool feedback = false;
++    uint32_t frame = 0;
++  };
++  std::unordered_map<uint64_t, std::deque<ResolvePrefetch>> resolve_feedback_history_;
++  std::unordered_map<uint64_t, ResolvePrefetch> resolve_prefetch_;
++  std::vector<uint64_t> resolve_prefetch_pending_;
++  void PrefetchResolveForCpu(uint32_t address, uint32_t length);
++  void PublishResolvePrefetchFences(ID3D12CommandQueue* queue);
++  bool TryPrefetchedResolveToGuestRam(
++      const std::vector<std::pair<uint32_t, uint32_t>>& ranges);
++  void ClearResolvePrefetch();
++  bool CanReadUnsubmittedResolveHistory(uint64_t key) const;
+   bool CreateReadbackStagingBuffer(ReadbackStagingBuffer& buffer,
+                                    uint32_t size);
+   void DestroyReadbackStagingBuffer(ReadbackStagingBuffer& buffer);
+@@ -418,11 +440,12 @@
+   std::array<double, 120> trace_swap_intervals_ = {};
+   size_t trace_swap_count_ = 0;
+ 
+-  static constexpr uint32_t kTraceDrawTimingCapacity = 16384;
++  static constexpr uint32_t kTraceDrawTimingCapacity = 262144;
+   struct TraceDrawTiming {
+     uint64_t frame, vertex_shader, pixel_shader;
+     uint32_t vertices, surface;
+   };
++  friend class D3D12TextureCache;
+   uint32_t BeginTraceDrawTiming(uint64_t vs, uint64_t ps, uint32_t vertices,
+                                 uint32_t surface);
+   void EndTraceDrawTiming(uint32_t slot);
+@@ -873,7 +896,7 @@
+   static constexpr uint32_t kScratchBufferSizeIncrement = 16 * 1024 * 1024;
+   ID3D12Resource* scratch_buffer_ = nullptr;
+   uint32_t scratch_buffer_size_ = 0;
+-  D3D12_RESOURCE_STATES scratch_buffer_state_;
++  D3D12_RESOURCE_STATES scratch_buffer_state_ = D3D12_RESOURCE_STATE_COMMON;
+   bool scratch_buffer_used_ = false;
+ 
+   // Two-buffer memexport page tracking (data + methods), shared with the Vulkan
+--- a/src/xenia/gpu/command_processor.h
++++ b/src/xenia/gpu/command_processor.h
+@@ -208,6 +208,15 @@
+   }
+ 
+   virtual void TracePlaybackWroteMemory(uint32_t base_ptr, uint32_t length) = 0;
++  // Backends may serve bounded completed history to asynchronous consumers.
++  // The shared read-watch code calls this with its resolve mutex held.
++  bool CanReadUnsubmittedResolveHistory(uint64_t key) const { return false; }
++
++  // True only when skipping an identical CPU snapshot cannot retain GPU output.
++  virtual bool TracePlaybackCanKeepMemory(uint32_t base_ptr, uint32_t length) {
++    return false;
++  }
++
+ 
+   // Shadowed by backends that route memory export through guest RAM (see
+   // command_processor_memexport.inc). No-ops where export output never reaches
+--- a/src/xenia/gpu/command_processor_resolve_readwatch.inc
++++ b/src/xenia/gpu/command_processor_resolve_readwatch.inc
+@@ -199,7 +199,8 @@
+     uint32_t owner_end = owner.address + owner.length;
+     uint32_t owner_first_page = owner.address >> 12;
+     uint32_t owner_last_page = std::min((owner_end - 1) >> 12, page_count - 1);
+-    if (owner.submission > submitted) {
++    if (owner.submission > submitted &&
++        (write || !CanReadUnsubmittedResolveHistory(owner_key))) {
+       if (write) {
+         ClipResolveEdgePagesWritten(owner, owner_first_page, owner_last_page,
+                                     first_page, last_page);
+@@ -299,6 +300,7 @@
+     owner.address = address;
+     owner.length = length;
+     owner.submission = GetCurrentSubmission();
++    owner.serial = ++resolve_owner_serial_;
+     owner.frame = resolve_frame_index_;
+     owner.copyable = !is_scaled;
+     owner.in_guest_ram = false;
+@@ -596,6 +598,7 @@
+   uint32_t length = 0;
+   // Submission the resolve was recorded in.
+   uint64_t submission = 0;
++  uint64_t serial = 0;
+   uint32_t frame = 0;
+   bool copyable = false;
+   bool in_guest_ram = false;
+@@ -607,6 +610,7 @@
+   bool clip_last_page = false;
+ };
+ std::unordered_map<uint64_t, ResolveOwner> resolve_owners_;
++uint64_t resolve_owner_serial_ = 0;
+ static constexpr size_t kMaxResolveOwners = 4096;
+ // Under resolve_read_mutex_.
+ void RearmResolveAfterSubmission(ResolveOwner& owner) {
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -16,6 +16,7 @@
+ #include <string>
+ 
+ #include "xenia/base/assert.h"
++#include "xenia/base/cvar.h"
+ #include "xenia/base/logging.h"
+ #include "xenia/base/math.h"
+ #include "xenia/base/profiling.h"
+@@ -27,6 +28,10 @@
+ #include "xenia/gpu/xenos.h"
+ #include "xenia/ui/d3d12/d3d12_upload_buffer_pool.h"
+ #include "xenia/ui/d3d12/d3d12_util.h"
++
++DEFINE_bool(d3d12_reuse_mip_variant_base, false,
++            "Copy a current base-only texture into identical mip-chain views "
++            "instead of decoding its tiled base again.", "GPU");
+ 
+ namespace xe {
+ namespace gpu {
+@@ -1606,14 +1611,47 @@
+     return false;
+   }
+   LogTextureLoad(texture_key, load_shader, load_base, load_mips);
++  const uint32_t load_timing = command_processor_.BeginTraceDrawTiming(
++      UINT64_MAX - 3, texture_key.mip_max_level, texture_key.GetWidth(),
++      texture_key.base_page << 12);
+   bool texture_resolution_scaled = texture_key.scaled_resolve;
+   ID3D12PipelineState* pipeline =
+       texture_resolution_scaled ? load_pipelines_scaled_[load_shader].Get()
+                                 : load_pipelines_[load_shader].Get();
+   if (pipeline == nullptr) {
++    command_processor_.EndTraceDrawTiming(load_timing);
+     return false;
+   }
+   const LoadShaderInfo& load_shader_info = GetLoadShaderInfo(load_shader);
++
++  if (cvars::d3d12_reuse_mip_variant_base && load_base &&
++      !texture_key.scaled_resolve && !texture_key.packed_mips) {
++    auto* source = static_cast<D3D12Texture*>(
++        FindCurrentBaseOnlyVariant(texture_key));
++    if (source && source->GetGuestBaseSize() == d3d12_texture.GetGuestBaseSize()) {
++      source->MarkAsUsed();
++      command_processor_.PushTransitionBarrier(
++          source->resource(),
++          source->SetResourceState(D3D12_RESOURCE_STATE_COPY_SOURCE),
++          D3D12_RESOURCE_STATE_COPY_SOURCE);
++      command_processor_.PushTransitionBarrier(
++          d3d12_texture.resource(),
++          d3d12_texture.SetResourceState(D3D12_RESOURCE_STATE_COPY_DEST),
++          D3D12_RESOURCE_STATE_COPY_DEST);
++      command_processor_.SubmitBarriers();
++      D3D12_TEXTURE_COPY_LOCATION src = {}, dst = {};
++      src.pResource = source->resource();
++      dst.pResource = d3d12_texture.resource();
++      src.Type = dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++      command_list.D3DCopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
++      d3d12_texture.MarkAsUsed();
++      load_base = false;
++      if (!load_mips) {
++        command_processor_.EndTraceDrawTiming(load_timing);
++        return true;
++      }
++    }
++  }
+ 
+   // Memexport-generated textures have their source in the host-imported buffer
+   // (guest RAM). The load below reads the device buffer, so copy the sampled
+@@ -1766,6 +1804,7 @@
+   ID3D12Resource* copy_buffer = command_processor_.RequestScratchGPUBuffer(
+       uint32_t(copy_buffer_size), copy_buffer_state);
+   if (copy_buffer == nullptr) {
++    command_processor_.EndTraceDrawTiming(load_timing);
+     return false;
+   }
+ 
+@@ -1825,6 +1864,7 @@
+                                          4)) {
+         command_processor_.ReleaseScratchGPUBuffer(copy_buffer,
+                                                    copy_buffer_state);
++        command_processor_.EndTraceDrawTiming(load_timing);
+         return false;
+       }
+       TransitionCurrentScaledResolveRange(
+@@ -2055,6 +2095,7 @@
+           static_cast<unsigned>(texture_dxgi_format));
+       command_processor_.PopDebugMarker();  // Pop mip generation marker.
+       command_processor_.PopDebugMarker();  // Pop texture load marker.
++      command_processor_.EndTraceDrawTiming(load_timing);
+       return true;  // Texture load succeeded, just no mips generated.
+     }
+ 
+@@ -2119,6 +2160,7 @@
+                level);
+         command_processor_.PopDebugMarker();  // Pop mip generation marker.
+         command_processor_.PopDebugMarker();  // Pop texture load marker.
++        command_processor_.EndTraceDrawTiming(load_timing);
+         return false;
+       }
+ 
+@@ -2236,6 +2278,7 @@
+   }
+ 
+   command_processor_.PopDebugMarker();  // Pop texture load marker.
++  command_processor_.EndTraceDrawTiming(load_timing);
+   return true;
+ }
+ 
+--- a/src/xenia/gpu/texture_cache.cc
++++ b/src/xenia/gpu/texture_cache.cc
+@@ -798,6 +798,22 @@
+   COUNT_profile_set("gpu/texture_cache/textures", 0);
+ }
+ 
++TextureCache::Texture* TextureCache::FindCurrentBaseOnlyVariant(TextureKey key) {
++  // Separate mip chains keep their own resources and sampler limits. Only
++  // reuse the already decoded base of an otherwise identical base-only view.
++  if (!key.mip_max_level || key.packed_mips || key.scaled_resolve ||
++      key.dimension != xenos::DataDimension::k2DOrStacked ||
++      key.GetDepthOrArraySize() != 1 || !key.base_page) {
++    return nullptr;
++  }
++  key.mip_max_level = 0;
++  key.mip_page = 0;
++  auto found = textures_.find(key);
++  if (found == textures_.end()) return nullptr;
++  auto lock = global_critical_region_.Acquire();
++  return found->second->base_outdated(lock) ? nullptr : found->second.get();
++}
++
+ TextureCache::Texture* TextureCache::FindOrCreateTexture(TextureKey key) {
+   SCOPE_profile_cpu_f("gpu");
+   // Check if the texture is a scaled resolve texture.
+--- a/src/xenia/gpu/texture_cache.h
++++ b/src/xenia/gpu/texture_cache.h
+@@ -620,6 +620,7 @@
+   // create the texture - if it's nullptr, occasionally a recreation attempt
+   // should be made.
+   Texture* FindOrCreateTexture(TextureKey key);
++  Texture* FindCurrentBaseOnlyVariant(TextureKey key);
+ 
+   static const LoadShaderInfo& GetLoadShaderInfo(
+       LoadShaderIndex load_shader_index) {
+--- a/src/xenia/gpu/d3d12/d3d12_shared_memory.cc
++++ b/src/xenia/gpu/d3d12/d3d12_shared_memory.cc
+@@ -18,6 +18,10 @@
+ #include "xenia/base/profiling.h"
+ #include "xenia/gpu/d3d12/d3d12_command_processor.h"
+ #include "xenia/ui/d3d12/d3d12_util.h"
++
++DEFINE_bool(d3d12_shared_memory_combined_reads, false,
++            "Keep copy-source and shader/index reads in one read-only resource "
++            "state, avoiding barriers between those read usages.", "GPU");
+ 
+ DECLARE_bool(gpu_allow_invalid_upload_range);
+ DECLARE_bool(enable_host_buffer);
+@@ -349,6 +353,15 @@
+ 
+ void D3D12SharedMemory::CommitUAVWritesAndTransitionBuffer(
+     D3D12_RESOURCE_STATES new_state) {
++  constexpr D3D12_RESOURCE_STATES shader_reads =
++      D3D12_RESOURCE_STATE_INDEX_BUFFER |
++      D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
++      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
++  if (cvars::d3d12_shared_memory_combined_reads &&
++      (new_state == shader_reads ||
++       new_state == D3D12_RESOURCE_STATE_COPY_SOURCE)) {
++    new_state = shader_reads | D3D12_RESOURCE_STATE_COPY_SOURCE;
++  }
+   if (buffer_state_ == new_state) {
+     if (new_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS &&
+         buffer_uav_writes_commit_needed_) {
+--- a/src/xenia/gpu/shared_memory.cc
++++ b/src/xenia/gpu/shared_memory.cc
+@@ -549,6 +549,35 @@
+       valid_mask &= (uint64_t(1) << ((page_last & 63) + 1)) - 1;
+     }
+     if ((system_page_flags_valid_[i] & valid_mask) != valid_mask) {
++      return false;
++    }
++  }
++  return true;
++}
++
++bool SharedMemory::IsRangeNotGpuWritten(uint32_t start, uint32_t length) const {
++  if (!length) {
++    return true;
++  }
++  if (start > kBufferSize || (kBufferSize - start) < length) {
++    return false;
++  }
++
++  auto lock = global_critical_region_.Acquire();
++  const uint32_t page_first = start >> page_size_log2_;
++  const uint32_t page_last = (start + length - 1) >> page_size_log2_;
++  const uint32_t block_first = page_first >> 6;
++  const uint32_t block_last = page_last >> 6;
++
++  for (uint32_t i = block_first; i <= block_last; ++i) {
++    uint64_t valid_mask = UINT64_MAX;
++    if (i == block_first) {
++      valid_mask &= ~((uint64_t(1) << (page_first & 63)) - 1);
++    }
++    if (i == block_last && (page_last & 63) != 63) {
++      valid_mask &= (uint64_t(1) << ((page_last & 63) + 1)) - 1;
++    }
++    if (system_page_flags_valid_and_gpu_written_[i] & valid_mask) {
+       return false;
+     }
+   }
+--- a/src/xenia/gpu/shared_memory.h
++++ b/src/xenia/gpu/shared_memory.h
+@@ -80,6 +80,7 @@
+   // memory copy. Hold the global critical region if relying on this for state
+   // transitions such as watch installation.
+   bool IsRangeValid(uint32_t start, uint32_t length) const;
++  bool IsRangeNotGpuWritten(uint32_t start, uint32_t length) const;
+ 
+   // Record only CPU-authoritative parts of a texture in an active trace.
+   // GPU-written pages are captured at trace initialization or regenerated by
+--- a/src/xenia/gpu/trace_player.cc
++++ b/src/xenia/gpu/trace_player.cc
+@@ -9,6 +9,10 @@
+ 
+ #include "xenia/gpu/trace_player.h"
+ 
++#include <cstring>
++#include <vector>
++
++#include "xenia/base/cvar.h"
+ #include "xenia/base/logging.h"
+ #include "xenia/gpu/command_processor.h"
+ #include "xenia/gpu/packet_disassembler.h"
+@@ -16,6 +20,10 @@
+ #include "xenia/gpu/registers.h"
+ #include "xenia/gpu/xenos.h"
+ #include "xenia/memory.h"
++
++DEFINE_bool(trace_keep_unchanged_cpu_memory, false,
++            "During repeated replay, preserve identical CPU snapshot "
++            "input ranges. Never skip restoring GPU-written ranges.", "GPU.Debug");
+ 
+ DECLARE_bool(log_draws);
+ 
+@@ -208,12 +216,35 @@
+       case TraceCommandType::kMemoryRead: {
+         auto cmd = reinterpret_cast<const MemoryCommand*>(trace_ptr);
+         trace_ptr += sizeof(*cmd);
+-        DecompressMemory(cmd->encoding_format, trace_ptr, cmd->encoded_length,
+-                         memory->TranslatePhysical(cmd->base_ptr),
+-                         cmd->decoded_length);
+-        trace_ptr += cmd->encoded_length;
+-        command_processor->TracePlaybackWroteMemory(cmd->base_ptr,
+-                                                    cmd->decoded_length);
++        bool restored = true;
++        if (cvars::trace_keep_unchanged_cpu_memory && cmd->decoded_length &&
++            command_processor->TracePlaybackCanKeepMemory(cmd->base_ptr,
++                                                         cmd->decoded_length)) {
++          replay_decode_scratch_.resize(cmd->decoded_length);
++          auto& decoded = replay_decode_scratch_;
++          DecompressMemory(cmd->encoding_format, trace_ptr, cmd->encoded_length,
++                           decoded.data(), cmd->decoded_length);
++          auto* dest = memory->TranslatePhysical(cmd->base_ptr);
++          if (cmd->base_ptr == 0x19E3A000 || cmd->base_ptr == 0x1B63A000 ||
++              cmd->base_ptr == 0x1AE3A000 || cmd->base_ptr == 0x1C63A000) {
++            XELOGI("TraceWarmMatch base={:08X} identical={}", cmd->base_ptr,
++                   std::memcmp(dest, decoded.data(), cmd->decoded_length) == 0);
++          }
++          if (std::memcmp(dest, decoded.data(), cmd->decoded_length) == 0) {
++            restored = false;
++          } else {
++            std::memcpy(dest, decoded.data(), cmd->decoded_length);
++          }
++        } else {
++          DecompressMemory(cmd->encoding_format, trace_ptr, cmd->encoded_length,
++                           memory->TranslatePhysical(cmd->base_ptr),
++                           cmd->decoded_length);
++        }
++        trace_ptr += cmd->encoded_length;
++        if (restored) {
++          command_processor->TracePlaybackWroteMemory(cmd->base_ptr,
++                                                       cmd->decoded_length);
++        }
+         break;
+       }
+       case TraceCommandType::kMemoryWrite: {
+--- a/src/xenia/gpu/trace_player.h
++++ b/src/xenia/gpu/trace_player.h
+@@ -57,6 +57,7 @@
+   void PlayTraceOnThread(const uint8_t* trace_data, size_t trace_size,
+                          TracePlaybackMode playback_mode, bool clear_caches);
+ 
++  std::vector<uint8_t> replay_decode_scratch_;
+   GraphicsSystem* graphics_system_;
+   int current_frame_index_;
+   int current_command_index_;
+--- /dev/null
++++ b/src/xenia/gpu/resolve_feedback_guards.h
+@@ -0,0 +1,21 @@
++// Game-specific safety guards for optional asynchronous texture feedback.
++#ifndef XENIA_GPU_RESOLVE_FEEDBACK_GUARDS_H_
++#define XENIA_GPU_RESOLVE_FEEDBACK_GUARDS_H_
++#include <cstdint>
++namespace xe::gpu::detail {
++constexpr bool IsEvilWithinTextureFeedback(uint32_t title, uint32_t length,
++                                          uint32_t pitch, uint32_t height,
++                                          uint32_t format) {
++  // Captured CPU-feedback targets: 32x128 RG32F / RGBA16F, and
++  // 160x64 RGBA8. All other sizes, formats and titles remain synchronous.
++  return title == 0x425307F4 &&
++      ((length == 32768 && pitch == 32 && height == 128 &&
++        (format == 37 || format == 32)) ||
++       (length == 40960 && pitch == 160 && height == 64 && format == 6));
++}
++constexpr bool FeedbackAgeAllowed(uint64_t owner_serial, uint64_t serial,
++                                  uint32_t owner_frame, uint32_t frame) {
++  return serial && serial <= owner_serial && uint32_t(owner_frame-frame) <= 4;
++}
++} // namespace xe::gpu::detail
++#endif

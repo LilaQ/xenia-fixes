@@ -1,0 +1,1051 @@
+diff --git a/src/xenia/apu/conversion.h b/src/xenia/apu/conversion.h
+index 915ace7..7440043 100644
+--- a/src/xenia/apu/conversion.h
++++ b/src/xenia/apu/conversion.h
+@@ -35,7 +35,7 @@ static void _generic_sequential_6_BE_to_interleaved_6_LE(
+     }
+   }
+ }
+-#if XE_COMPILER_CLANG_CL != 1 && !XE_PLATFORM_LINUX
++#if XE_COMPILER_MSVC && XE_COMPILER_CLANG_CL != 1
+ // load_be_u32 unavailable on clang-cl
+ XE_NOINLINE
+ static void _movbe_sequential_6_BE_to_interleaved_6_LE(
+diff --git a/src/xenia/base/clock_x64.cc b/src/xenia/base/clock_x64.cc
+index a3f952a..3b72868 100644
+--- a/src/xenia/base/clock_x64.cc
++++ b/src/xenia/base/clock_x64.cc
+@@ -16,7 +16,7 @@
+ 
+ // Wrap all these different cpu compiler intrinsics.
+ // So no inline assembler here and the compiler will remove the clutter.
+-#if XE_COMPILER_MSVC
++#if XE_COMPILER_MSVC || defined(__MINGW32__)
+ #define xe_cpu_cpuid(level, eax, ebx, ecx, edx)              \
+   {                                                          \
+     int __xe_cpuid_registers_[4];                            \
+diff --git a/src/xenia/base/console_app_main_win.cc b/src/xenia/base/console_app_main_win.cc
+index 601ffcd..5084e59 100644
+--- a/src/xenia/base/console_app_main_win.cc
++++ b/src/xenia/base/console_app_main_win.cc
+@@ -7,30 +7,41 @@
+  ******************************************************************************
+  */
+ 
++#include <cstdio>
+ #include <cstdlib>
++#include <exception>
+ 
+ #include "xenia/base/console_app_main.h"
+ #include "xenia/base/main_win.h"
+ 
+ // A wide character entry point is required for functions like _get_wpgmptr.
+ int wmain(int argc_ignored, wchar_t** argv_ignored) {
+-  xe::ConsoleAppEntryInfo entry_info = xe::GetConsoleAppEntryInfo();
++  const char* stage = "entry information";
++  try {
++    xe::ConsoleAppEntryInfo entry_info = xe::GetConsoleAppEntryInfo();
+ 
+-  std::vector<std::string> args;
+-  if (!xe::ParseWin32LaunchArguments(entry_info.transparent_options,
+-                                     entry_info.positional_usage,
+-                                     entry_info.positional_options, &args)) {
+-    return EXIT_FAILURE;
+-  }
++    stage = "argument parsing";
++    std::vector<std::string> args;
++    if (!xe::ParseWin32LaunchArguments(entry_info.transparent_options,
++                                       entry_info.positional_usage,
++                                       entry_info.positional_options, &args)) {
++      return EXIT_FAILURE;
++    }
+ 
+-  int result = xe::InitializeWin32App(entry_info.name);
+-  if (result) {
+-    return result;
+-  }
++    stage = "logging initialization";
++    int result = xe::InitializeWin32App(entry_info.name);
++    if (result) {
++      return result;
++    }
+ 
+-  result = entry_info.entry_point(args);
++    stage = "trace replay";
++    result = entry_info.entry_point(args);
+ 
+-  xe::ShutdownWin32App();
++    xe::ShutdownWin32App();
+ 
+-  return result;
++    return result;
++  } catch (const std::exception& error) {
++    fprintf(stderr, "Replay bootstrap failed during %s: %s\n", stage, error.what());
++    return EXIT_FAILURE;
++  }
+ }
+diff --git a/src/xenia/base/mapped_memory_win.cc b/src/xenia/base/mapped_memory_win.cc
+index 9c1e52b..7a11adf 100644
+--- a/src/xenia/base/mapped_memory_win.cc
++++ b/src/xenia/base/mapped_memory_win.cc
+@@ -26,8 +26,7 @@ namespace xe {
+ class Win32MappedMemory : public MappedMemory {
+  public:
+   // CreateFile returns INVALID_HANDLE_VALUE in case of failure.
+-  // chrispy: made inline const to get around clang error
+-  static inline constexpr HANDLE kFileHandleInvalid = INVALID_HANDLE_VALUE;
++  static inline const HANDLE kFileHandleInvalid = INVALID_HANDLE_VALUE;
+   // CreateFileMapping returns nullptr in case of failure.
+   static constexpr HANDLE kMappingHandleInvalid = nullptr;
+ 
+diff --git a/src/xenia/base/memory.h b/src/xenia/base/memory.h
+index 8ef40bb..9067bdf 100644
+--- a/src/xenia/base/memory.h
++++ b/src/xenia/base/memory.h
+@@ -116,7 +116,7 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out);
+ // The memory must be freed with AlignedFree.
+ template <typename T>
+ inline T* AlignedAlloc(size_t alignment) {
+-#if XE_COMPILER_MSVC
++#if XE_PLATFORM_WIN32
+   return reinterpret_cast<T*>(_aligned_malloc(sizeof(T), alignment));
+ #else
+   void* ptr = nullptr;
+@@ -124,17 +124,17 @@ inline T* AlignedAlloc(size_t alignment) {
+     return nullptr;
+   }
+   return reinterpret_cast<T*>(ptr);
+-#endif  // XE_COMPILER_MSVC
++#endif  // XE_PLATFORM_WIN32
+ }
+ 
+ // Frees memory previously allocated with AlignedAlloc.
+ template <typename T>
+ void AlignedFree(T* ptr) {
+-#if XE_COMPILER_MSVC
++#if XE_PLATFORM_WIN32
+   _aligned_free(ptr);
+ #else
+   free(ptr);
+-#endif  // XE_COMPILER_MSVC
++#endif  // XE_PLATFORM_WIN32
+ }
+ 
+ #if XE_PLATFORM_WIN32
+diff --git a/src/xenia/base/socket_win.cc b/src/xenia/base/socket_win.cc
+index a62efd7..2f38a54 100644
+--- a/src/xenia/base/socket_win.cc
++++ b/src/xenia/base/socket_win.cc
+@@ -15,9 +15,9 @@
+ #include "xenia/base/platform_win.h"
+ 
+ // winsock includes must come after platform_win.h:
+-#include <mstcpip.h>   // NOLINT(build/include_order)
+ #include <winsock2.h>  // NOLINT(build/include_order)
+ #include <ws2tcpip.h>  // NOLINT(build/include_order)
++#include <mstcpip.h>   // NOLINT(build/include_order)
+ 
+ namespace xe {
+ 
+diff --git a/src/xenia/base/string_buffer.cc b/src/xenia/base/string_buffer.cc
+index 025c9b2..924f2e5 100644
+--- a/src/xenia/base/string_buffer.cc
++++ b/src/xenia/base/string_buffer.cc
+@@ -10,6 +10,7 @@
+ #include "xenia/base/string_buffer.h"
+ 
+ #include <cstdarg>
++#include <cstdlib>
+ 
+ #include "xenia/base/assert.h"
+ #include "xenia/base/literals.h"
+diff --git a/src/xenia/base/threading_win.cc b/src/xenia/base/threading_win.cc
+index dfd7bfa..4209ecc 100644
+--- a/src/xenia/base/threading_win.cc
++++ b/src/xenia/base/threading_win.cc
+@@ -517,10 +517,6 @@ class Win32Thread : public Win32Handle<Thread> {
+   ~Win32Thread() = default;
+ 
+   void set_name(std::string name) override {
+-    // this can actually happen in some debug builds
+-    if (&name == nullptr) {
+-      return;
+-    }
+     xe::threading::set_name(handle_, name);
+     Thread::set_name(name);
+   }
+diff --git a/src/xenia/cpu/backend/x64/x64_backend.cc b/src/xenia/cpu/backend/x64/x64_backend.cc
+index 3e52e70..4139923 100644
+--- a/src/xenia/cpu/backend/x64/x64_backend.cc
++++ b/src/xenia/cpu/backend/x64/x64_backend.cc
+@@ -1478,7 +1478,7 @@ void* X64HelperEmitter::EmitFrsqrteHelper() {
+   je(L25, CodeGenerator::T_NEAR);
+ 
+   L(L9);
+-  lea(edx, ptr[0 + rcx * 8]);
++  lea(edx, ptr[rcx * 8]);
+   shr(rax, 49);
+   sub(ecx, 1023);
+   and_(edx, 8);
+diff --git a/src/xenia/cpu/backend/x64/x64_code_cache_win.cc b/src/xenia/cpu/backend/x64/x64_code_cache_win.cc
+index 0993164..d84714a 100644
+--- a/src/xenia/cpu/backend/x64/x64_code_cache_win.cc
++++ b/src/xenia/cpu/backend/x64/x64_code_cache_win.cc
+@@ -20,11 +20,12 @@
+ #include "xenia/base/platform_win.h"
+ #include "xenia/cpu/function.h"
+ 
+-// Function pointer definitions
+-using FnRtlAddGrowableFunctionTable = decltype(&RtlAddGrowableFunctionTable);
+-using FnRtlGrowFunctionTable = decltype(&RtlGrowFunctionTable);
+-using FnRtlDeleteGrowableFunctionTable =
+-    decltype(&RtlDeleteGrowableFunctionTable);
++// Resolve these APIs dynamically, including with SDKs that hide declarations
++// behind a newer _WIN32_WINNT setting.
++using FnRtlAddGrowableFunctionTable = DWORD(NTAPI*)(
++    PVOID*, PRUNTIME_FUNCTION, DWORD, DWORD, ULONG_PTR, ULONG_PTR);
++using FnRtlGrowFunctionTable = VOID(NTAPI*)(PVOID, DWORD);
++using FnRtlDeleteGrowableFunctionTable = VOID(NTAPI*)(PVOID);
+ 
+ namespace xe {
+ namespace cpu {
+diff --git a/src/xenia/cpu/backend/x64/x64_sequences.cc b/src/xenia/cpu/backend/x64/x64_sequences.cc
+index 29c885a..79d7ef2 100644
+--- a/src/xenia/cpu/backend/x64/x64_sequences.cc
++++ b/src/xenia/cpu/backend/x64/x64_sequences.cc
+@@ -70,7 +70,11 @@ using namespace xe::cpu::hir;
+ using xe::cpu::hir::Instr;
+ 
+ typedef bool (*SequenceSelectFn)(X64Emitter&, const Instr*, InstrKeyValue ikey);
+-std::unordered_map<uint32_t, SequenceSelectFn> sequence_table;
++// Registration runs across translation units before main. Initialize on first use.
++std::unordered_map<uint32_t, SequenceSelectFn>& SequenceTable() {
++  static auto* table = new std::unordered_map<uint32_t, SequenceSelectFn>();
++  return *table;
++}
+ 
+ // ============================================================================
+ // OPCODE_COMMENT
+@@ -3308,8 +3312,8 @@ bool SelectSequence(X64Emitter* e, const Instr* i, const Instr** new_tail) {
+   } else {
+     const InstrKey key(i);
+ 
+-    auto it = sequence_table.find(key);
+-    if (it != sequence_table.end()) {
++    auto it = SequenceTable().find(key);
++    if (it != SequenceTable().end()) {
+       if (it->second(*e, i, key)) {
+         *new_tail = i->next;
+         return true;
+diff --git a/src/xenia/cpu/backend/x64/x64_sequences.h b/src/xenia/cpu/backend/x64/x64_sequences.h
+index 05a5b42..edcf23c 100644
+--- a/src/xenia/cpu/backend/x64/x64_sequences.h
++++ b/src/xenia/cpu/backend/x64/x64_sequences.h
+@@ -26,11 +26,11 @@ namespace x64 {
+ class X64Emitter;
+ 
+ typedef bool (*SequenceSelectFn)(X64Emitter&, const hir::Instr*, uint32_t ikey);
+-extern std::unordered_map<uint32_t, SequenceSelectFn> sequence_table;
++std::unordered_map<uint32_t, SequenceSelectFn>& SequenceTable();
+ 
+ template <typename T>
+ bool Register() {
+-  sequence_table.insert({T::head_key(), T::Select});
++  SequenceTable().insert({T::head_key(), T::Select});
+   return true;
+ }
+ 
+diff --git a/src/xenia/cpu/stack_walker_win.cc b/src/xenia/cpu/stack_walker_win.cc
+index 1312048..cf26674 100644
+--- a/src/xenia/cpu/stack_walker_win.cc
++++ b/src/xenia/cpu/stack_walker_win.cc
+@@ -308,8 +308,8 @@ class Win32StackWalker : public StackWalker {
+   }
+ 
+  private:
+-  static PVOID WINAPI XSymFunctionTableAccess64(__in HANDLE hProcess,
+-                                                __in DWORD64 AddrBase) {
++  static PVOID WINAPI XSymFunctionTableAccess64(_In_ HANDLE hProcess,
++                                                _In_ DWORD64 AddrBase) {
+     if (AddrBase >= code_cache_min_ && AddrBase < code_cache_max_) {
+       // Within our generated range so ask code cache.
+       return code_cache_->LookupUnwindInfo(AddrBase);
+diff --git a/src/xenia/emulator.cc b/src/xenia/emulator.cc
+index eadd15c..8cb55ad 100644
+--- a/src/xenia/emulator.cc
++++ b/src/xenia/emulator.cc
+@@ -200,7 +200,8 @@ X_STATUS Emulator::Setup(
+     std::function<std::unique_ptr<gpu::GraphicsSystem>()>
+         graphics_system_factory,
+     std::function<std::vector<std::unique_ptr<hid::InputDriver>>(ui::Window*)>
+-        input_driver_factory) {
++        input_driver_factory,
++    bool with_headless_presentation) {
+   X_STATUS result = X_STATUS_UNSUCCESSFUL;
+ 
+   display_window_ = display_window;
+@@ -300,7 +301,9 @@ X_STATUS Emulator::Setup(
+   }
+ 
+   // Add inputSystem to UI
+-  imgui_drawer_->LoadInputSystem(input_system_.get());
++  if (imgui_drawer_) {
++    imgui_drawer_->LoadInputSystem(input_system_.get());
++  }
+ 
+   XELOGI("{}: Initializing VFS...", __func__);
+   // Bring up the virtual filesystem used by the kernel.
+@@ -330,7 +333,7 @@ X_STATUS Emulator::Setup(
+   result = graphics_system_->Setup(
+       processor_.get(), kernel_state_.get(),
+       display_window_ ? &display_window_->app_context() : nullptr,
+-      display_window_ != nullptr);
++      display_window_ != nullptr || with_headless_presentation);
+   if (result) {
+     XELOGE("{}: Failed to setup graphics_system!", __func__);
+     return result;
+diff --git a/src/xenia/emulator.h b/src/xenia/emulator.h
+index 9d5e92e..2bb45d2 100644
+--- a/src/xenia/emulator.h
++++ b/src/xenia/emulator.h
+@@ -189,7 +189,8 @@ class Emulator {
+       std::function<std::unique_ptr<gpu::GraphicsSystem>()>
+           graphics_system_factory,
+       std::function<std::vector<std::unique_ptr<hid::InputDriver>>(ui::Window*)>
+-          input_driver_factory);
++          input_driver_factory,
++      bool with_headless_presentation = false);
+ 
+   // Terminates the currently running title.
+   X_STATUS TerminateTitle();
+diff --git a/src/xenia/gpu/d3d12/CMakeLists.txt b/src/xenia/gpu/d3d12/CMakeLists.txt
+index f1950a5..301b116 100644
+--- a/src/xenia/gpu/d3d12/CMakeLists.txt
++++ b/src/xenia/gpu/d3d12/CMakeLists.txt
+@@ -28,6 +28,14 @@ if(XENIA_BUILD_MISC)
+     ${CMAKE_CURRENT_SOURCE_DIR}/d3d12_trace_dump_main.cc
+     ${PROJECT_SOURCE_DIR}/src/xenia/base/console_app_main_win.cc
+   )
++  set(_xe_trace_dump_resources "${CMAKE_CURRENT_BINARY_DIR}/trace_dump_resources.rc")
++  file(GENERATE OUTPUT "${_xe_trace_dump_resources}" CONTENT
++    "1 24 \"${PROJECT_SOURCE_DIR}/src/xenia/base/app_win32.manifest\"\n")
++  target_sources(xenia-gpu-d3d12-trace-dump PRIVATE "${_xe_trace_dump_resources}")
++  if(MINGW)
++    target_link_options(xenia-gpu-d3d12-trace-dump PRIVATE -municode)
++    target_link_libraries(xenia-gpu-d3d12-trace-dump PRIVATE ntdll wsock32 ws2_32 xinput comctl32 shcore shlwapi dxguid bcrypt)
++  endif()
+   target_link_libraries(xenia-gpu-d3d12-trace-dump PRIVATE
+     xenia-apu xenia-apu-nop xenia-base xenia-core xenia-cpu
+     xenia-gpu xenia-gpu-d3d12 xenia-hid xenia-hid-nop
+diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.cc b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+index 7149982..617360e 100644
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -42,6 +42,8 @@ DEFINE_bool(d3d12_submit_on_primary_buffer_end, true,
+ DECLARE_bool(clear_memory_page_state);
+ DECLARE_bool(readback_resolve_half_pixel_offset);
+ 
++DEFINE_bool(d3d12_submission_timing, false, "Measure completed GPU submissions without additional waits.", "D3D12");
++
+ namespace xe {
+ namespace gpu {
+ namespace d3d12 {
+@@ -1686,6 +1688,13 @@ bool D3D12CommandProcessor::SetupContext() {
+ 
+ void D3D12CommandProcessor::ShutdownContext() {
+   AwaitAllQueueOperationsCompletion();
++  PollSubmissionTimings();
++  if (submission_timing_readback_.mapped) {
++    submission_timing_readback_.resource->Unmap(0, nullptr);
++    submission_timing_readback_.mapped = nullptr;
++  }
++  submission_timing_readback_.resource.Reset();
++  submission_timing_heap_.Reset();
+ 
+   for (auto& pair : readback_buffers_) {
+     ui::d3d12::util::ReleaseAndNull(pair.second.buffers[0]);
+@@ -3869,6 +3878,89 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
+   return true;
+ }
+ 
++bool D3D12CommandProcessor::CreateTimingReadbackBuffer() {
++  D3D12_RESOURCE_DESC desc;
++  ui::d3d12::util::FillBufferResourceDesc(desc, kSubmissionTimingSlots * 16,
++                                         D3D12_RESOURCE_FLAG_NONE);
++  if (FAILED(GetD3D12Provider().GetDevice()->CreateCommittedResource(
++          &ui::d3d12::util::kHeapPropertiesReadback, D3D12_HEAP_FLAG_NONE,
++          &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
++          IID_PPV_ARGS(&submission_timing_readback_.resource)))) {
++    return false;
++  }
++  D3D12_RANGE range = {0, kSubmissionTimingSlots * 16};
++  return SUCCEEDED(submission_timing_readback_.resource->Map(
++      0, &range, &submission_timing_readback_.mapped));
++}
++
++bool D3D12CommandProcessor::EnsureSubmissionTimingResources() {
++  if (submission_timing_heap_) {
++    return true;
++  }
++  if (submission_timing_unavailable_) {
++    return false;
++  }
++  const auto& provider = GetD3D12Provider();
++  D3D12_QUERY_HEAP_DESC desc = {};
++  desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
++  desc.Count = kSubmissionTimingSlots * 2;
++  if (FAILED(provider.GetDirectQueue()->GetTimestampFrequency(
++          &submission_timing_frequency_)) || !submission_timing_frequency_ ||
++      FAILED(provider.GetDevice()->CreateQueryHeap(
++          &desc, IID_PPV_ARGS(&submission_timing_heap_))) ||
++      !CreateTimingReadbackBuffer()) {
++    submission_timing_heap_.Reset();
++    submission_timing_unavailable_ = true;
++    XELOGE("GPU timing: timestamp resources unavailable");
++    return false;
++  }
++  XELOGI("GPU timing: hardware timestamps enabled ({} ticks/s)",
++         submission_timing_frequency_);
++  return true;
++}
++
++void D3D12CommandProcessor::PollSubmissionTimings() {
++  if (!submission_timing_readback_.mapped) {
++    return;
++  }
++  const uint64_t completed = GetCompletedSubmission();
++  const auto* timestamps =
++      static_cast<const uint64_t*>(submission_timing_readback_.mapped);
++  while (!submission_timings_.empty() &&
++         submission_timings_.front().submission <= completed) {
++    const SubmissionTiming timing = submission_timings_.front();
++    submission_timings_.pop_front();
++    const uint64_t begin = timestamps[timing.slot * 2];
++    const uint64_t end = timestamps[timing.slot * 2 + 1];
++    submission_timing_in_use_[timing.slot] = 0;
++    if (end >= begin) {
++      submission_timing_frame_ms_ +=
++          double(end - begin) * 1000.0 / double(submission_timing_frequency_);
++    }
++    if (timing.ends_frame) {
++      submission_timing_total_ms_ += submission_timing_frame_ms_;
++      submission_timing_max_ms_ =
++          std::max(submission_timing_max_ms_, submission_timing_frame_ms_);
++      submission_timing_frame_ms_ = 0;
++      submission_timing_skipped_ += timing.skipped_draws;
++      submission_timing_wall_total_ms_ += timing.frame_wall_ms;
++      if (++submission_timing_frames_ == 120) {
++        XELOGI("GPU timing: through frame {}, frame avg {:.3f} ms, "
++               "GPU submissions avg {:.3f} ms, max {:.3f} ms; "
++               "no-output draws skipped avg {:.1f}/frame",
++               timing.frame, submission_timing_wall_total_ms_ / 120.0,
++               submission_timing_total_ms_ / 120.0, submission_timing_max_ms_,
++               double(submission_timing_skipped_) / 120.0);
++        submission_timing_frames_ = 0;
++        submission_timing_total_ms_ = 0;
++        submission_timing_wall_total_ms_ = 0;
++        submission_timing_max_ms_ = 0;
++        submission_timing_skipped_ = 0;
++      }
++    }
++  }
++}
++
+ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+   const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+ 
+@@ -3927,8 +4019,51 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+         command_allocator_writable_first_->command_allocator;
+     command_allocator->Reset();
+     command_list_->Reset(command_allocator, nullptr);
++    // Measure only commands within one submitted list, excluding CPU gaps
++    // between submissions. Read back only after its existing fence completes;
++    // measuring must never introduce a GPU wait or reuse an in-flight slot.
++    PollSubmissionTimings();
++    const uint32_t timing_slot =
++        uint32_t(GetCurrentSubmission() % kSubmissionTimingSlots);
++    bool measure_submission = cvars::d3d12_submission_timing &&
++                              EnsureSubmissionTimingResources() &&
++                              !submission_timing_in_use_[timing_slot];
++    if (measure_submission) {
++      command_list_->EndQuery(submission_timing_heap_.Get(),
++                              D3D12_QUERY_TYPE_TIMESTAMP, timing_slot * 2);
++    }
+     deferred_command_list_.Execute(command_list_, command_list_1_,
+                                    command_list_2_);
++    if (measure_submission) {
++      command_list_->EndQuery(submission_timing_heap_.Get(),
++                              D3D12_QUERY_TYPE_TIMESTAMP, timing_slot * 2 + 1);
++      command_list_->ResolveQueryData(
++          submission_timing_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
++          timing_slot * 2, 2, submission_timing_readback_.resource.Get(),
++          timing_slot * 16);
++      submission_timing_in_use_[timing_slot] = GetCurrentSubmission();
++      double frame_wall_ms = 0;
++      if (is_closing_frame) {
++        const uint64_t now = xe::Clock::QueryHostTickCount();
++        if (submission_timing_last_swap_tick_) {
++          frame_wall_ms = double(now - submission_timing_last_swap_tick_) *
++                          1000.0 / double(xe::Clock::QueryHostTickFrequency());
++        }
++        submission_timing_last_swap_tick_ = now;
++      }
++      submission_timings_.push_back(
++          {GetCurrentSubmission(), frame_current_, timing_slot,
++           is_closing_frame, is_closing_frame ? no_output_draws_skipped_ : 0,
++           frame_wall_ms});
++    } else if (cvars::d3d12_submission_timing &&
++               submission_timing_in_use_[timing_slot]) {
++      // Mark the measurement unusable rather than silently undercounting.
++      XELOGE("GPU timing: ring full, submission {} not sampled",
++             GetCurrentSubmission());
++    }
++    if (is_closing_frame) {
++      no_output_draws_skipped_ = 0;
++    }
+     command_list_->Close();
+     ID3D12CommandList* execute_command_lists[] = {command_list_};
+     direct_queue->ExecuteCommandLists(1, execute_command_lists);
+diff --git a/src/xenia/gpu/d3d12/d3d12_command_processor.h b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+index 7c6324c..ed6b297 100644
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -11,6 +11,7 @@
+ #define XENIA_GPU_D3D12_D3D12_COMMAND_PROCESSOR_H_
+ 
+ #include <algorithm>
++#include <array>
+ #include <atomic>
+ #include <deque>
+ #include <memory>
+@@ -332,6 +333,37 @@ class D3D12CommandProcessor final : public CommandProcessor {
+   void InitializeTrace() override;
+ 
+  private:
++  static constexpr uint32_t kSubmissionTimingSlots = 256;
++  struct SubmissionTiming {
++    uint64_t submission;
++    uint64_t frame;
++    uint32_t slot;
++    bool ends_frame;
++    uint64_t skipped_draws;
++    double frame_wall_ms;
++  };
++  void PollSubmissionTimings();
++  bool EnsureSubmissionTimingResources();
++  Microsoft::WRL::ComPtr<ID3D12QueryHeap> submission_timing_heap_;
++  struct TimingReadback {
++    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
++    void* mapped = nullptr;
++  } submission_timing_readback_;
++  bool CreateTimingReadbackBuffer();
++  uint64_t submission_timing_frequency_ = 0;
++  bool submission_timing_unavailable_ = false;
++  std::deque<SubmissionTiming> submission_timings_;
++  std::array<uint64_t, kSubmissionTimingSlots> submission_timing_in_use_{};
++  double submission_timing_frame_ms_ = 0;
++  double submission_timing_total_ms_ = 0;
++  double submission_timing_wall_total_ms_ = 0;
++  uint64_t submission_timing_last_swap_tick_ = 0;
++  double submission_timing_max_ms_ = 0;
++  uint32_t submission_timing_frames_ = 0;
++  uint64_t submission_timing_skipped_ = 0;
++  uint64_t no_output_draws_skipped_ = 0;
++
++
+   static constexpr uint32_t kQueueFrames = 3;
+ 
+   enum RootParameter : UINT {
+diff --git a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+index 1cc5ac1..5714fb4 100644
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -1283,8 +1283,14 @@ D3D12TextureCache::D3D12Texture::D3D12Texture(
+   ID3D12Device* device =
+       texture_cache.command_processor_.GetD3D12Provider().GetDevice();
+   D3D12_RESOURCE_DESC resource_desc = resource_->GetDesc();
++#if defined(__MINGW32__)
++  D3D12_RESOURCE_ALLOCATION_INFO allocation_info;
++  device->GetResourceAllocationInfo(&allocation_info, 0, 1, &resource_desc);
++  SetHostMemoryUsage(allocation_info.SizeInBytes);
++#else
+   SetHostMemoryUsage(
+       device->GetResourceAllocationInfo(0, 1, &resource_desc).SizeInBytes);
++#endif
+ }
+ 
+ D3D12TextureCache::D3D12Texture::~D3D12Texture() {
+diff --git a/src/xenia/gpu/draw_util.cc b/src/xenia/gpu/draw_util.cc
+index fa99a4f..ba70ab5 100644
+--- a/src/xenia/gpu/draw_util.cc
++++ b/src/xenia/gpu/draw_util.cc
+@@ -765,7 +765,7 @@ static inline void GetScissorTmpl(const RegisterFile& XE_RESTRICT regs,
+       pa_sc_screen_scissor_tl_tl_x, pa_sc_screen_scissor_tl_tl_y,
+       pa_sc_screen_scissor_br_br_x, pa_sc_screen_scissor_br_br_y);
+ #if XE_PLATFORM_WIN32
+-  __m128i xyoffsetadd = _mm_cvtsi64x_si128(
++  __m128i xyoffsetadd = _mm_cvtsi64_si128(
+       static_cast<unsigned long long>(pa_sc_window_offset_window_x_offset) |
+       (static_cast<unsigned long long>(pa_sc_window_offset_window_y_offset)
+        << 32));
+diff --git a/src/xenia/gpu/pm4_command_processor_declare.h b/src/xenia/gpu/pm4_command_processor_declare.h
+index 93a9aaf..94b0eb2 100644
+--- a/src/xenia/gpu/pm4_command_processor_declare.h
++++ b/src/xenia/gpu/pm4_command_processor_declare.h
+@@ -9,7 +9,7 @@ virtual uint32_t ExecutePrimaryBuffer(uint32_t start_index, uint32_t end_index)
+ virtual bool ExecutePacket() PM4_OVERRIDE;
+ 
+ public:
+-void ExecutePacket(uint32_t ptr, uint32_t count);
++virtual void ExecutePacket(uint32_t ptr, uint32_t count) PM4_OVERRIDE;
+ 
+ protected:
+ XE_NOINLINE
+diff --git a/src/xenia/gpu/trace_dump.cc b/src/xenia/gpu/trace_dump.cc
+index 6009ee8..92db7ce 100644
+--- a/src/xenia/gpu/trace_dump.cc
++++ b/src/xenia/gpu/trace_dump.cc
+@@ -18,6 +18,8 @@
+ #include "xenia/gpu/command_processor.h"
+ #include "xenia/gpu/graphics_system.h"
+ #include "xenia/memory.h"
++#include "xenia/config.h"
++#include "xenia/gpu/gpu_flags.h"
+ #include "xenia/ui/file_picker.h"
+ #include "xenia/ui/presenter.h"
+ #include "xenia/ui/window.h"
+@@ -39,6 +41,10 @@ DEFINE_path(target_trace_file, "", "Specifies the trace file to load.",
+             "GPU.Debug");
+ DEFINE_path(trace_dump_path, "", "Output path for dumped files.", "GPU.Debug");
+ 
++DEFINE_uint32(trace_dump_repeat_count, 0,
++              "Repeat the complete trace with caches retained; GPU timestamps "
++              "measure work, replay wall time is not game FPS.", "GPU.Debug");
++
+ namespace xe {
+ namespace gpu {
+ 
+@@ -71,6 +77,8 @@ int TraceDump::Main(const std::vector<std::string>& args) {
+     return 5;
+   }
+ 
++  config::SetupConfig({});
++
+   // Normalize the path and make absolute.
+   auto abs_path = std::filesystem::absolute(path);
+   XELOGI("Loading trace file {}...", abs_path);
+@@ -105,7 +113,7 @@ bool TraceDump::Setup() {
+   emulator_ = std::make_unique<Emulator>("", "", "", "");
+   X_STATUS result = emulator_->Setup(
+       nullptr, nullptr, false, nullptr,
+-      [this]() { return CreateGraphicsSystem(); }, nullptr);
++      [this]() { return CreateGraphicsSystem(); }, nullptr, true);
+   if (XFAILED(result)) {
+     XELOGE("Failed to setup emulator: {:08X}", result);
+     return false;
+@@ -126,34 +134,43 @@ bool TraceDump::Load(const std::filesystem::path& trace_file_path) {
+   return true;
+ }
+ 
+-int TraceDump::Run() {
+-  BeginHostCapture();
+-  player_->SeekFrame(0);
+-  player_->SeekCommand(
+-      static_cast<int>(player_->current_frame()->commands.size() - 1));
+-  player_->WaitOnPlayback();
+-  EndHostCapture();
+-
+-  // Capture.
+-  int result = 0;
++bool TraceDump::CaptureToPng(const std::filesystem::path& png_path) {
+   ui::Presenter* presenter = graphics_system_->presenter();
+   ui::RawImage raw_image;
+-  if (presenter && presenter->CaptureGuestOutput(raw_image)) {
+-    // Save framebuffer png.
+-    auto png_path = base_output_path_.replace_extension(".png");
+-    auto handle = filesystem::OpenFile(png_path, "wb");
+-    auto callback = [](void* context, void* data, int size) {
+-      fwrite(data, 1, size, (FILE*)context);
+-    };
+-    stbi_write_png_to_func(callback, handle, static_cast<int>(raw_image.width),
+-                           static_cast<int>(raw_image.height), 4,
+-                           raw_image.data.data(),
+-                           static_cast<int>(raw_image.stride));
+-    fclose(handle);
+-  } else {
+-    result = 1;
++  if (!presenter || !presenter->CaptureGuestOutput(raw_image)) {
++    return false;
++  }
++  auto handle = filesystem::OpenFile(png_path, "wb");
++  if (!handle) {
++    return false;
+   }
++  auto callback = [](void* context, void* data, int size) {
++    fwrite(data, 1, size, (FILE*)context);
++  };
++  stbi_write_png_to_func(callback, handle, static_cast<int>(raw_image.width),
++                         static_cast<int>(raw_image.height), 4,
++                         raw_image.data.data(),
++                         static_cast<int>(raw_image.stride));
++  fclose(handle);
++  return true;
++}
+ 
++int TraceDump::Run() {
++  if (cvars::async_shader_compilation || !player_->frame_count()) {
++    XELOGE("Trace repetition requires a nonempty trace and synchronous shaders");
++    return 1;
++  }
++  uint32_t passes = cvars::trace_dump_repeat_count
++                        ? cvars::trace_dump_repeat_count : 1;
++  for (uint32_t pass = 0; pass < passes; ++pass) {
++    for (size_t frame = 0; frame < player_->frame_count(); ++frame) {
++      player_->ReplayFrame(int(frame));
++      player_->WaitOnPlayback();
++    }
++  }
++  int result = CaptureToPng(base_output_path_.replace_extension(".png")) ? 0 : 1;
++  XELOGI("Trace repeat complete: {} passes; final image {}", passes,
++         result ? "failed" : "written");
+   player_.reset();
+   emulator_.reset();
+   return result;
+diff --git a/src/xenia/gpu/trace_dump.h b/src/xenia/gpu/trace_dump.h
+index 9815eac..727eccc 100644
+--- a/src/xenia/gpu/trace_dump.h
++++ b/src/xenia/gpu/trace_dump.h
+@@ -45,6 +45,7 @@ class TraceDump {
+ 
+  private:
+   bool Setup();
++  bool CaptureToPng(const std::filesystem::path& png_path);
+   bool Load(const std::filesystem::path& trace_file_path);
+   int Run();
+ 
+diff --git a/src/xenia/gpu/trace_player.cc b/src/xenia/gpu/trace_player.cc
+index 303e4d5..6a86469 100644
+--- a/src/xenia/gpu/trace_player.cc
++++ b/src/xenia/gpu/trace_player.cc
+@@ -41,6 +41,17 @@ const TraceReader::Frame* TracePlayer::current_frame() const {
+   return frame(current_frame_index_);
+ }
+ 
++void TracePlayer::ReplayFrame(int target_frame) {
++  assert_false(is_playing_trace());
++  assert_true(target_frame >= 0 && size_t(target_frame) < frame_count());
++  current_frame_index_ = target_frame;
++  const auto* captured_frame = frame(target_frame);
++  current_command_index_ = int(captured_frame->commands.size()) - 1;
++  PlayTrace(captured_frame->start_ptr,
++            captured_frame->end_ptr - captured_frame->start_ptr,
++            TracePlaybackMode::kUntilEnd, false);
++}
++
+ void TracePlayer::SeekFrame(int target_frame) {
+   if (current_frame_index_ == target_frame) {
+     return;
+@@ -162,6 +173,8 @@ void TracePlayer::PlayTraceOnThread(const uint8_t* trace_data,
+         }
+         if (pending_break) {
+           playing_trace_ = false;
++          // Break-on-swap ends playback normally, and the event is auto-reset.
++          playback_event_->Set();
+           return;
+         }
+         break;
+diff --git a/src/xenia/gpu/trace_player.h b/src/xenia/gpu/trace_player.h
+index 9117e88..f88d113 100644
+--- a/src/xenia/gpu/trace_player.h
++++ b/src/xenia/gpu/trace_player.h
+@@ -41,6 +41,9 @@ class TracePlayer : public TraceReader {
+   // Scalar from 0-10000
+   uint32_t playback_percent() const { return playback_percent_; }
+ 
++  // Replays the complete captured frame, including its initial register,
++  // memory and EDRAM snapshots, without discarding compiled pipelines.
++  void ReplayFrame(int target_frame);
+   void SeekFrame(int target_frame);
+   void SeekCommand(int target_command);
+ 
+@@ -55,7 +58,7 @@ class TracePlayer : public TraceReader {
+   GraphicsSystem* graphics_system_;
+   int current_frame_index_;
+   int current_command_index_;
+-  bool playing_trace_ = false;
++  std::atomic<bool> playing_trace_ = {false};
+   std::atomic<uint32_t> playback_percent_ = {0};
+   std::unique_ptr<xe::threading::Event> playback_event_;
+ };
+diff --git a/src/xenia/kernel/xam/xdbf/spa_info.cc b/src/xenia/kernel/xam/xdbf/spa_info.cc
+index ce0d479..6598b6e 100644
+--- a/src/xenia/kernel/xam/xdbf/spa_info.cc
++++ b/src/xenia/kernel/xam/xdbf/spa_info.cc
+@@ -7,6 +7,7 @@
+  ******************************************************************************
+  */
+ 
++#include <algorithm>
+ #include "xenia/kernel/xam/xdbf/spa_info.h"
+ 
+ namespace xe {
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
+index 2e6ecf5..612c5a2 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
+@@ -26,14 +26,14 @@ namespace xboxkrnl {
+ 
+ struct CreateOptions {
+   // https://processhacker.sourceforge.io/doc/ntioapi_8h.html
+-  static constexpr uint32_t FILE_DIRECTORY_FILE = 0x00000001;
++  static constexpr uint32_t kDirectoryFile = 0x00000001;
+   // Optimization - files access will be sequential, not random.
+-  static constexpr uint32_t FILE_SEQUENTIAL_ONLY = 0x00000004;
+-  static constexpr uint32_t FILE_SYNCHRONOUS_IO_ALERT = 0x00000010;
+-  static constexpr uint32_t FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020;
+-  static constexpr uint32_t FILE_NON_DIRECTORY_FILE = 0x00000040;
++  static constexpr uint32_t kSequentialOnly = 0x00000004;
++  static constexpr uint32_t kSynchronousIoAlert = 0x00000010;
++  static constexpr uint32_t kSynchronousIoNonalert = 0x00000020;
++  static constexpr uint32_t kNonDirectoryFile = 0x00000040;
+   // Optimization - file access will be random, not sequential.
+-  static constexpr uint32_t FILE_RANDOM_ACCESS = 0x00000800;
++  static constexpr uint32_t kRandomAccess = 0x00000800;
+ };
+ 
+ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
+@@ -83,8 +83,8 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
+   X_STATUS result = kernel_state()->file_system()->OpenFile(
+       root_entry, target_path,
+       vfs::FileDisposition((uint32_t)creation_disposition), desired_access,
+-      (create_options & CreateOptions::FILE_DIRECTORY_FILE) != 0,
+-      (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) != 0, &vfs_file,
++      (create_options & CreateOptions::kDirectoryFile) != 0,
++      (create_options & CreateOptions::kNonDirectoryFile) != 0, &vfs_file,
+       &file_action);
+   object_ref<XFile> file = nullptr;
+ 
+@@ -92,8 +92,8 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
+   if (XSUCCEEDED(result)) {
+     // If true, desired_access SYNCHRONIZE flag must be set.
+     bool synchronous =
+-        (create_options & CreateOptions::FILE_SYNCHRONOUS_IO_ALERT) ||
+-        (create_options & CreateOptions::FILE_SYNCHRONOUS_IO_NONALERT);
++        (create_options & CreateOptions::kSynchronousIoAlert) ||
++        (create_options & CreateOptions::kSynchronousIoNonalert);
+     file = object_ref<XFile>(new XFile(kernel_state(), vfs_file, synchronous));
+ 
+     // Handle ref is incremented, so return that.
+diff --git a/src/xenia/ui/d3d12/CMakeLists.txt b/src/xenia/ui/d3d12/CMakeLists.txt
+index 74f4785..1d7b3ae 100644
+--- a/src/xenia/ui/d3d12/CMakeLists.txt
++++ b/src/xenia/ui/d3d12/CMakeLists.txt
+@@ -16,3 +16,7 @@ if(XENIA_BUILD_MISC)
+   )
+   xe_target_defaults(xenia-ui-window-d3d12-demo)
+ endif()
++
++if(MINGW)
++  target_link_libraries(xenia-ui-d3d12 PUBLIC dxguid)
++endif()
+diff --git a/src/xenia/ui/d3d12/d3d12_api.h b/src/xenia/ui/d3d12/d3d12_api.h
+index 11dd186..82b442f 100644
+--- a/src/xenia/ui/d3d12/d3d12_api.h
++++ b/src/xenia/ui/d3d12/d3d12_api.h
+@@ -22,7 +22,18 @@
+ #include "third_party/DirectX-Headers/include/directx/d3d12.h"
+ #include "third_party/DirectX-Headers/include/directx/d3d12sdklayers.h"
+ 
++#if defined(__MINGW32__)
++// MinGW does not ship DXProgrammableCapture.h. Match the Windows SDK interface.
++MIDL_INTERFACE("9f251514-9d4d-4902-9d60-18988ab7d4b5")
++IDXGraphicsAnalysis : public IUnknown {
++  virtual void STDMETHODCALLTYPE BeginCapture() = 0;
++  virtual void STDMETHODCALLTYPE EndCapture() = 0;
++};
++__CRT_UUID_DECL(IDXGraphicsAnalysis, 0x9f251514, 0x9d4d, 0x4902, 0x9d, 0x60,
++                0x18, 0x98, 0x8a, 0xb7, 0xd4, 0xb5)
++#else
+ #include <DXProgrammableCapture.h>
++#endif
+ #include <d3dcompiler.h>
+ #include <dxgi1_6.h>
+ #include <dxgidebug.h>
+@@ -32,6 +43,13 @@
+ #include "third_party/DirectXShaderCompiler/include/dxc/dxcapi.h"
+ #include "third_party/DirectXShaderCompiler/projects/dxilconv/include/DxbcConverter.h"
+ 
++#if defined(__MINGW32__)
++#include "xenia/ui/d3d12/d3d12_mingw_uuid.h"
++__CRT_UUID_DECL(IDxbcConverter, 0x5f956ed5, 0x78d1, 0x4b15, 0x82, 0x47, 0xf7, 0x18, 0x76, 0x14, 0xa0, 0x41)
++__CRT_UUID_DECL(IDxcUtils, 0x4605c4cb, 0x2019, 0x492a, 0xad, 0xa4, 0x65, 0xf2, 0x0b, 0xb7, 0xd6, 0x7f)
++__CRT_UUID_DECL(IDxcCompiler, 0x8c210bf3, 0x011f, 0x4422, 0x8d, 0x70, 0x6f, 0x9a, 0xcb, 0x8d, 0xb6, 0x17)
++#endif
++
+ #define XELOGD3D XELOGI
+ 
+ #endif  // XENIA_UI_D3D12_D3D12_API_H_
+diff --git a/src/xenia/ui/d3d12/d3d12_provider.cc b/src/xenia/ui/d3d12/d3d12_provider.cc
+index 52954dd..0f04957 100644
+--- a/src/xenia/ui/d3d12/d3d12_provider.cc
++++ b/src/xenia/ui/d3d12/d3d12_provider.cc
+@@ -269,7 +269,7 @@ bool D3D12Provider::Initialize() {
+     DXGI_ADAPTER_DESC1 adapter_desc;
+     if (SUCCEEDED(adapter->GetDesc1(&adapter_desc))) {
+       if (SUCCEEDED(pfn_d3d12_create_device_(adapter, D3D_FEATURE_LEVEL_11_0,
+-                                             _uuidof(ID3D12Device), nullptr))) {
++                                             IID_ID3D12Device, nullptr))) {
+         if (cvars::d3d12_adapter >= 0) {
+           if (adapter_index == cvars::d3d12_adapter) {
+             break;
+diff --git a/src/xenia/ui/imgui_drawer.cc b/src/xenia/ui/imgui_drawer.cc
+index d803160..33e1e1f 100644
+--- a/src/xenia/ui/imgui_drawer.cc
++++ b/src/xenia/ui/imgui_drawer.cc
+@@ -28,7 +28,7 @@
+ #include "third_party/stb/stb_image.h"
+ 
+ #if XE_PLATFORM_WIN32
+-#include <ShlObj_core.h>
++#include <shlobj.h>
+ #endif
+ 
+ #if XE_PLATFORM_LINUX
+diff --git a/src/xenia/ui/windowed_app_context_win.cc b/src/xenia/ui/windowed_app_context_win.cc
+index c63cd65..94fa2cc 100644
+--- a/src/xenia/ui/windowed_app_context_win.cc
++++ b/src/xenia/ui/windowed_app_context_win.cc
+@@ -40,7 +40,7 @@ bool Win32WindowedAppContext::Initialize() {
+     per_monitor_dpi_v1_api_available_ &=
+         (*reinterpret_cast<void**>(
+              &per_monitor_dpi_v1_api_.get_dpi_for_monitor) =
+-             GetProcAddress(shcore_module_, "GetDpiForMonitor")) != nullptr;
++             reinterpret_cast<void*>(GetProcAddress(shcore_module_, "GetDpiForMonitor"))) != nullptr;
+   }
+   user32_module_ = LoadLibraryW(L"user32.dll");
+   if (user32_module_) {
+@@ -48,21 +48,21 @@ bool Win32WindowedAppContext::Initialize() {
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+              &per_monitor_dpi_v2_api_.adjust_window_rect_ex_for_dpi) =
+-             GetProcAddress(user32_module_, "AdjustWindowRectExForDpi")) !=
++             reinterpret_cast<void*>(GetProcAddress(user32_module_, "AdjustWindowRectExForDpi"))) !=
+         nullptr;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+              &per_monitor_dpi_v2_api_.enable_non_client_dpi_scaling) =
+-             GetProcAddress(user32_module_, "EnableNonClientDpiScaling")) !=
++             reinterpret_cast<void*>(GetProcAddress(user32_module_, "EnableNonClientDpiScaling"))) !=
+         nullptr;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+              &per_monitor_dpi_v2_api_.get_dpi_for_system) =
+-             GetProcAddress(user32_module_, "GetDpiForSystem")) != nullptr;
++             reinterpret_cast<void*>(GetProcAddress(user32_module_, "GetDpiForSystem"))) != nullptr;
+     per_monitor_dpi_v2_api_available_ &=
+         (*reinterpret_cast<void**>(
+              &per_monitor_dpi_v2_api_.get_dpi_for_window) =
+-             GetProcAddress(user32_module_, "GetDpiForWindow")) != nullptr;
++             reinterpret_cast<void*>(GetProcAddress(user32_module_, "GetDpiForWindow"))) != nullptr;
+   }
+ 
+   // Create the message-only window for executing pending functions - using a
+diff --git a/src/xenia/vfs/entry.cc b/src/xenia/vfs/entry.cc
+index 90d6b5c..54cc804 100644
+--- a/src/xenia/vfs/entry.cc
++++ b/src/xenia/vfs/entry.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "xenia/vfs/entry.h"
+ 
++#include <algorithm>
+ #include <utility>
+ 
+ #include "xenia/base/filesystem.h"
+diff --git a/third_party/CMakeLists.txt b/third_party/CMakeLists.txt
+index 808f0ee..5683908 100644
+--- a/third_party/CMakeLists.txt
++++ b/third_party/CMakeLists.txt
+@@ -195,34 +195,11 @@ target_include_directories(pugixml PUBLIC pugixml/src)
+ # ==============================================================================
+ # snappy
+ # ==============================================================================
+-# Generate snappy-stubs-public.h if missing
+-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/snappy/snappy-stubs-public.h")
+-  if(XE_TARGET_X86_64)
+-    set(_snappy_avx_flag "-DSNAPPY_REQUIRE_AVX=ON")
+-  else()
+-    set(_snappy_avx_flag "-DSNAPPY_REQUIRE_AVX=OFF")
+-  endif()
+-  execute_process(
+-    COMMAND ${CMAKE_COMMAND}
+-      -DSNAPPY_BUILD_TESTS=OFF
+-      -DSNAPPY_BUILD_BENCHMARKS=OFF
+-      ${_snappy_avx_flag}
+-      ${CMAKE_CURRENT_SOURCE_DIR}/snappy
+-      -B${CMAKE_CURRENT_SOURCE_DIR}/snappy
+-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+-  )
+-endif()
+-add_library(snappy STATIC
+-  snappy/snappy-internal.h
+-  snappy/snappy-sinksource.cc
+-  snappy/snappy-sinksource.h
+-  snappy/snappy-stubs-internal.cc
+-  snappy/snappy-stubs-internal.h
+-  snappy/snappy-stubs-public.h
+-  snappy/snappy.cc
+-  snappy/snappy.h
+-)
+-target_include_directories(snappy PUBLIC snappy)
++set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
++set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
++set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
++set(SNAPPY_REQUIRE_AVX ${XE_TARGET_X86_64} CACHE BOOL "" FORCE)
++add_subdirectory(snappy EXCLUDE_FROM_ALL)
+ 
+ # ==============================================================================
+ # xxhash
+@@ -380,7 +357,15 @@ if(WIN32)
+     libusb/libusb/os/windows_winusb.c
+     libusb/libusb/os/windows_winusb.h
+   )
+-  target_include_directories(libusb PUBLIC libusb/libusb PRIVATE libusb/msvc)
++  if(MINGW)
++    set(_xe_libusb_config_dir "${CMAKE_CURRENT_BINARY_DIR}/libusb-config")
++    file(MAKE_DIRECTORY "${_xe_libusb_config_dir}")
++    file(WRITE "${_xe_libusb_config_dir}/config.h"
++      "#define DEFAULT_VISIBILITY\n#define ENABLE_LOGGING 1\n#define PLATFORM_WINDOWS 1\n#define PRINTF_FORMAT(a, b)\n")
++    target_include_directories(libusb PUBLIC libusb/libusb PRIVATE "${_xe_libusb_config_dir}")
++  else()
++    target_include_directories(libusb PUBLIC libusb/libusb PRIVATE libusb/msvc)
++  endif()
+ endif()
+ 
+ # ==============================================================================
+diff --git a/third_party/microprofile/microprofile.h b/third_party/microprofile/microprofile.h
+index 29de52d..8ade8dc 100644
+--- a/third_party/microprofile/microprofile.h
++++ b/third_party/microprofile/microprofile.h
+@@ -2855,7 +2855,7 @@ void MicroProfileDumpHtml(MicroProfileWriteCallback CB, void* Handle, int nMaxFr
+ 	MicroProfilePrintf(CB, Handle, "var DumpHost = '%s';\n", pHost ? pHost : "");
+ 	time_t CaptureTime;
+ 	time(&CaptureTime);
+-	MicroProfilePrintf(CB, Handle, "var DumpUtcCaptureTime = %ld;\n", CaptureTime);
++	MicroProfilePrintf(CB, Handle, "var DumpUtcCaptureTime = %lld;\n", (long long)CaptureTime);
+ 	MicroProfilePrintf(CB, Handle, "var AggregateInfo = {'Frames':%d, 'Time':%f};\n", S.nAggregateFrames, fAggregateMs);
+ 
+ 	//categories
+diff --git a/tools/build/compile_shader_dxbc.py b/tools/build/compile_shader_dxbc.py
+index d191a21..b9586c0 100644
+--- a/tools/build/compile_shader_dxbc.py
++++ b/tools/build/compile_shader_dxbc.py
+@@ -72,7 +72,7 @@ def main():
+     is_dxc = "dxc" in os.path.basename(fxc).lower()
+ 
+     # Start with base command — use wine on non-Windows platforms.
+-    if sys.platform != "win32":
++    if sys.platform != "win32" and fxc.lower().endswith(".exe"):
+         compiler_args = ["wine", fxc]
+     else:
+         compiler_args = [fxc]

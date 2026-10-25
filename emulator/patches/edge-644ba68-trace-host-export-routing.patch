@@ -1,0 +1,142 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -4088,7 +4088,8 @@
+     const uint8_t* host = shared_memory_->GetHostBufferMapping();
+     uint64_t bytes = 0;
+     for (const auto& run : memexport_copy_runs_) {
+-      trace_writer_.WriteMemoryRead(run.first, run.second, host + run.first);
++      trace_writer_.WriteHostExportMemoryRead(run.first, run.second,
++                                             host + run.first);
+       bytes += run.second;
+     }
+     XELOGI("Trace host memexport snapshot: {} bytes across {} ranges", bytes,
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -85,6 +85,9 @@
+ 
+   void RequestFrameTrace(const std::filesystem::path& root_path) override;
+ 
++  void TracePlaybackHostExportRange(uint32_t base_ptr, uint32_t length) override {
++    MarkMemexportPagesWritten(base_ptr, length, false);
++  }
+   void TracePlaybackWroteMemory(uint32_t base_ptr, uint32_t length) override;
+   bool TracePlaybackCanKeepMemory(uint32_t base_ptr, uint32_t length) override;
+ 
+--- a/src/xenia/gpu/trace_protocol.h
++++ b/src/xenia/gpu/trace_protocol.h
+@@ -23,7 +23,7 @@
+ // Other changes besides the file format may require bumps, such as
+ // anything that changes what is recorded into the files (new GPU
+ // command processor commands, etc).
+-constexpr uint32_t kTraceFormatVersion = 1;
++constexpr uint32_t kTraceFormatVersion = 2;
+ 
+ // Trace file header identifying information about the trace.
+ // This must be positioned at the start of the file and must only occur once.
+@@ -55,6 +55,8 @@
+   kEvent,
+   kRegisters,
+   kGammaRamp,
++  // MemoryCommand payload plus initial host-export routing state.
++  kHostExportMemoryRead,
+ };
+ 
+ struct PrimaryBufferStartCommand {
+--- a/src/xenia/gpu/trace_reader.cc
++++ b/src/xenia/gpu/trace_reader.cc
+@@ -44,7 +44,7 @@
+ 
+   // Verify version.
+   auto header = reinterpret_cast<const TraceHeader*>(trace_data_);
+-  if (header->version != kTraceFormatVersion) {
++  if (header->version != 1 && header->version != kTraceFormatVersion) {
+     XELOGE("Trace format version mismatch, code has {}, file has {}",
+            kTraceFormatVersion, header->version);
+     if (header->version < kTraceFormatVersion) {
+@@ -187,6 +187,7 @@
+         }
+         break;
+       }
++      case TraceCommandType::kHostExportMemoryRead:
+       case TraceCommandType::kMemoryRead: {
+         auto cmd = reinterpret_cast<const MemoryCommand*>(trace_ptr);
+         trace_ptr += sizeof(*cmd) + cmd->encoded_length;
+--- a/src/xenia/gpu/trace_player.cc
++++ b/src/xenia/gpu/trace_player.cc
+@@ -213,6 +213,7 @@
+         }
+         break;
+       }
++      case TraceCommandType::kHostExportMemoryRead:
+       case TraceCommandType::kMemoryRead: {
+         auto cmd = reinterpret_cast<const MemoryCommand*>(trace_ptr);
+         trace_ptr += sizeof(*cmd);
+@@ -245,6 +246,10 @@
+           command_processor->TracePlaybackWroteMemory(cmd->base_ptr,
+                                                        cmd->decoded_length);
+         }
++        if (type == TraceCommandType::kHostExportMemoryRead) {
++          command_processor->TracePlaybackHostExportRange(cmd->base_ptr,
++                                                         cmd->decoded_length);
++        }
+         break;
+       }
+       case TraceCommandType::kMemoryWrite: {
+--- a/src/xenia/gpu/trace_viewer.cc
++++ b/src/xenia/gpu/trace_viewer.cc
+@@ -389,6 +389,7 @@
+         }
+         break;
+       }
++      case TraceCommandType::kHostExportMemoryRead:
+       case TraceCommandType::kMemoryRead: {
+         auto cmd = reinterpret_cast<const MemoryCommand*>(trace_ptr);
+         trace_ptr += sizeof(*cmd) + cmd->encoded_length;
+--- a/src/xenia/gpu/trace_writer.h
++++ b/src/xenia/gpu/trace_writer.h
+@@ -51,6 +51,8 @@
+   void WritePacketEnd();
+   void WriteMemoryRead(uint32_t base_ptr, size_t length,
+                        const void* host_ptr = nullptr);
++  void WriteHostExportMemoryRead(uint32_t base_ptr, size_t length,
++                                 const void* host_ptr);
+   void WriteMemoryReadCached(uint32_t base_ptr, size_t length);
+   void WriteMemoryReadCachedNop(uint32_t base_ptr, size_t length);
+   void WriteMemoryWrite(uint32_t base_ptr, size_t length,
+@@ -98,6 +100,8 @@
+   static constexpr void WritePacketEnd() {}
+   static constexpr void WriteMemoryRead(uint32_t base_ptr, size_t length,
+                                         const void* host_ptr = nullptr) {}
++  static constexpr void WriteHostExportMemoryRead(uint32_t, size_t,
++                                                   const void*) {}
+   static constexpr void WriteMemoryReadCached(uint32_t base_ptr,
+                                               size_t length) {}
+   static constexpr void WriteMemoryReadCachedNop(uint32_t base_ptr,
+--- a/src/xenia/gpu/trace_writer.cc
++++ b/src/xenia/gpu/trace_writer.cc
+@@ -146,6 +146,14 @@
+     return;
+   }
+   WriteMemoryCommand(TraceCommandType::kMemoryRead, base_ptr, length, host_ptr);
++}
++
++void TraceWriter::WriteHostExportMemoryRead(uint32_t base_ptr, size_t length,
++                                             const void* host_ptr) {
++  if (file_) {
++    WriteMemoryCommand(TraceCommandType::kHostExportMemoryRead, base_ptr,
++                       length, host_ptr);
++  }
+ }
+ 
+ void TraceWriter::WriteMemoryReadCached(uint32_t base_ptr, size_t length) {
+--- a/src/xenia/gpu/command_processor.h
++++ b/src/xenia/gpu/command_processor.h
+@@ -207,6 +207,8 @@
+     return trace_state_ == TraceState::kStreaming;
+   }
+ 
++  virtual void TracePlaybackHostExportRange(uint32_t base_ptr,
++                                             uint32_t length) {}
+   virtual void TracePlaybackWroteMemory(uint32_t base_ptr, uint32_t length) = 0;
+   // Backends may serve bounded completed history to asynchronous consumers.
+   // The shared read-watch code calls this with its resolve mutex held.

@@ -1,0 +1,14 @@
+title_name = "BioShock GOTY / Ultimate Rapture Edition"
+title_id = "545407D8"
+hash = "DA62C7B0EA7405CF" # Installed module hash from the cabinet log.
+# media_id = "44E704F7"
+
+[[patch]]
+    name = "Unlock framerate (native VSYNC 0 command)"
+    desc = "Route the shared VSYNC 1 command to the native VSYNC 0 path, overriding the saved 30-FPS setting. Set the emulator output cap to 60. Does not change simulation time."
+    author = "Cabinet local patch"
+    is_enabled = true
+
+    [[patch.be16]]
+        address = 0x82036e18
+        value = 0x0030

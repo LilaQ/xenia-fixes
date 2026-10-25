@@ -1,0 +1,144 @@
+{
+  "edge_commit": "417b37dfeb9a35937ed3ab98ce85177f27a50fa2",
+  "submodule_commits": {
+    "third_party/DirectX-Headers": "33374754f65baac0500dda6187e371136357246f",
+    "third_party/xbyak": "9d8ff37306f39c6a71cf998078cbe880ce5dc224"
+  },
+  "cmake_options": {
+    "XENIA_ENABLE_GPU_TRACE": true,
+    "XENIA_ENABLE_PROFILER": true,
+    "XENIA_ENABLE_LTO": false,
+    "XENIA_BUILD_MISC": true
+  },
+  "cxx_flags": [
+    "-DUNICODE",
+    "-D_UNICODE",
+    "-fms-extensions",
+    "-DXE_OPTION_PROFILING_UI=1"
+  ],
+  "slang_version": "2026.8",
+  "dxc_tag": "v1.8.2505.1",
+  "dxc_directx_headers_commit": "980971e835876dc0cde415e8f9bc646e64667bf7",
+  "llvm_mingw_version": "20260826-ucrt",
+  "agility_sdk_version": "1.619.3",
+  "gat_game_release": {
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "XENIA_ENABLE_GPU_TRACE": false,
+      "XENIA_ENABLE_PROFILER": false,
+      "XENIA_ENABLE_LTO": true
+    },
+    "cxx_flags": [
+      "-DUNICODE",
+      "-D_UNICODE",
+      "-fms-extensions"
+    ],
+    "fixed_shader_driver": "tools/slang-host.cc",
+    "fixed_shader_wrapper": "tools/slangc-dxc.sh"
+  },
+  "canary_replay": {
+    "commit": "cc4981a4659086acb1c25a485adebefc3f432ae1",
+    "patch": "patches/canary-mingw-replay.patch",
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "XENIA_BUILD_MISC": true
+    },
+    "cxx_flags": [
+      "-DUNICODE",
+      "-D_UNICODE",
+      "-fms-extensions"
+    ],
+    "guest_shader_translation": "DXBC",
+    "fixed_shader_compiler": "native DXC",
+    "fixed_shader_model": "6_0",
+    "submodule_overrides": {
+      "third_party/DirectX-Headers": "33374754f65baac0500dda6187e371136357246f",
+      "third_party/xbyak": "9d8ff37306f39c6a71cf998078cbe880ce5dc224"
+    }
+  },
+  "evil_within_game": {
+    "edge_commit": "644ba68febd06c4e0affa2c6ea146d0eb7fbfc73",
+    "patches": [
+      "patches/edge-644ba68-tfu2-trace.patch",
+      "patches/evil-within-readback-prefetch.patch"
+    ],
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "XENIA_ENABLE_GPU_TRACE": true,
+      "XENIA_ENABLE_PROFILER": false,
+      "XENIA_ENABLE_LTO": false,
+      "XENIA_BUILD_MISC": true
+    },
+    "cxx_flags": [
+      "-DUNICODE",
+      "-D_UNICODE",
+      "-fms-extensions"
+    ],
+    "binary_name": "xenia_edge_evilwithin.exe",
+    "binary_sha256": "4D5EAE0A04966AB1AF8B899DF4A417296EC922E79535D7C2BE40F1025722702D",
+    "strip_debug": true,
+    "config_options": "files/evil-within-feedback-options.toml",
+    "game_patch": "game-patches/425307F4 - The Evil Within 60FPS (base).patch.toml",
+    "feedback_guard_test": "tests/EvilWithinFeedbackGuards.Tests.cc"
+  },
+  "mic_emulator": {
+    "edge_commit": "644ba68febd06c4e0affa2c6ea146d0eb7fbfc73",
+    "patches": [
+      "patches/edge-644ba68-mingw-dependencies.patch",
+      "patches/edge-644ba68-tfu2-trace.patch",
+      "patches/edge-644ba68-xmic-host-capture.patch",
+      "patches/edge-644ba68-title-keys-aes.patch",
+      "patches/edge-644ba68-apc-object-pointer.patch",
+      "patches/edge-644ba68-xmic-async-data.patch",
+      "patches/edge-644ba68-xmic-multimic-low-latency.patch",
+      "patches/edge-644ba68-hid-dpad-priority.patch",
+      "patches/edge-644ba68-xmic-device-selection.patch",
+      "patches/edge-644ba68-xmic-auto-devices.patch"
+    ],
+    "build_script": "tools/build-edge-mic.sh",
+    "rb2_config_overrides": "files/mic-rb2-overrides.toml",
+    "rb3_config_overrides": "files/mic-rb3-overrides.toml",
+    "mic_audio_latency_overrides": "files/mic-games-low-latency-overrides.toml",
+    "def_jam_rapstar_input_overrides": "files/def-jam-rapstar-input-overrides.toml",
+    "cab_mic_device_overrides": "files/cab-mic-device-overrides.toml",
+    "binary_name": "xenia_edge_mic.exe",
+    "binary_sha256": "D4FE39A7C9EEE92C464F7A123899B2DF3F62B4400D5991E4AFA88947CB1DCA32",
+    "strip_mode": "all"
+  },
+  "rivals_game": {
+    "edge_commit": "417b37dfeb9a35937ed3ab98ce85177f27a50fa2",
+    "patches": [
+      "patches/rivals-edge-417b37d-complete.patch"
+    ],
+    "patch_application": "Apply the complete aggregate alone to the base commit, not on top of the individual patches.",
+    "additional_files": [
+      "files/src/xenia/gpu/d3d12/hdr_feedback_snapshot.h",
+      "files/src/xenia/ui/d3d12/d3d12_mingw_uuid.h"
+    ],
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "XENIA_ENABLE_GPU_TRACE": true,
+      "XENIA_ENABLE_PROFILER": false,
+      "XENIA_ENABLE_LTO": true,
+      "XENIA_BUILD_MISC": true
+    },
+    "cxx_flags": [
+      "-DUNICODE",
+      "-D_UNICODE",
+      "-fms-extensions"
+    ],
+    "llvm_mingw_version": "20260826-ucrt",
+    "submodule_overrides": {
+      "third_party/DirectX-Headers": "33374754f65baac0500dda6187e371136357246f",
+      "third_party/xbyak": "9d8ff37306f39c6a71cf998078cbe880ce5dc224"
+    },
+    "fixed_shader_driver": "tools/slang-host.cc",
+    "fixed_shader_wrapper": "tools/slangc-dxc.sh",
+    "binary_name": "xenia_edge_rivals.exe",
+    "binary_sha256": "D92200A51ED469EF04961631749CA9EA306C7B61438D202973D3AA108F8AF623",
+    "strip_debug": true,
+    "config_options": "files/rivals-edge-overrides.toml",
+    "game_patch": "game-patches/454109C6 - Need for Speed Rivals TU2 variable rendering.patch.toml",
+    "fence_guard_test": "tests/Build-RivalsGpuFence.Tests.py"
+  }
+}

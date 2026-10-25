@@ -1,0 +1,13 @@
+title_name = "Resident Evil 6"
+title_id = "43430819"
+hash = "44A96367B5C19FB1"
+
+[[patch]]
+    name = "60 FPS - one render per base-rate tick"
+    desc = "Use the existing 60 Hz simulation base rate as the variable render limiter. Preserve base timing and elapsed-time calculation. Use vsync=false and framerate_limit=0 in Canary; fixed-timestep modes are unchanged."
+    author = "LilaQ"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x8327ACC0
+        value = 0xFD800090

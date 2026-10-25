@@ -1,0 +1,151 @@
+--- a/src/xenia/gpu/d3d12/pipeline_cache.cc
++++ b/src/xenia/gpu/d3d12/pipeline_cache.cc
+@@ -37,6 +37,7 @@
+ #include "xenia/gpu/spirv_shader_translator.h"
+ #include "xenia/gpu/spirv_to_dxil_compiler.h"
+ #include "xenia/gpu/xenos.h"
++#include "xenia/gpu/texture_util.h"
+ #include "xenia/ui/d3d12/d3d12_util.h"
+ 
+ #include "third_party/fmt/include/fmt/xchar.h"
+@@ -59,6 +60,10 @@
+             "Shade side-effect-free textureless fragments before the ROV "
+             "critical section. Uses separate pipeline storage.",
+             "D3D12");
++DEFINE_bool(d3d12_static_unsigned_texture_signs, false,
++            "Specialize pixel texture-sign selection only when all used "
++            "fetches are unsigned. Rechecked per draw; separate pipeline key.",
++            "GPU.Debug");
+ DECLARE_bool(precise_interpolation);
+ 
+ namespace xe {
+@@ -305,10 +310,11 @@
+   // Full ZPD counters change every ROV pixel shader, so they get their own
+   // storage.
+   pipeline_config.file_suffix = fmt::format(
+-      ".{}{}{}{}.d3d12.xpso", edram_rov_used ? "rov" : "rtv",
++      ".{}{}{}{}{}.d3d12.xpso", edram_rov_used ? "rov" : "rtv",
+       edram_rov_used && cvars::occlusion_query_full_counters ? "-fc" : "",
+       edram_rov_used && cvars::d3d12_fsi_late_blended ? "-lateblend" : "",
+-      edram_rov_used && cvars::d3d12_fsi_late_simple ? "-latesimple" : "");
++      edram_rov_used && cvars::d3d12_fsi_late_simple ? "-latesimple" : "",
++      cvars::d3d12_static_unsigned_texture_signs ? "-unsigned" : "");
+   pipeline_config.api_magic = edram_rov_used ? 0x4F525844 : 0x54525844;
+   // Sum so a bump of either version invalidates - both only ever move up.
+   pipeline_config.version = PipelineDescription::kVersion +
+@@ -627,9 +633,33 @@
+     const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+     reg::RB_DEPTHCONTROL normalized_depth_control,
+     uint32_t normalized_color_mask, bool apply_polygon_offset_in_shader) const {
+-  return guest_shader_cache_.GetPixelShaderModification(
+-      shader, interpolator_mask, param_gen_pos, normalized_depth_control,
+-      normalized_color_mask, apply_polygon_offset_in_shader);
++  SpirvShaderTranslator::Modification modification(
++      guest_shader_cache_.GetPixelShaderModification(
++          shader, interpolator_mask, param_gen_pos, normalized_depth_control,
++          normalized_color_mask, apply_polygon_offset_in_shader));
++  if (cvars::d3d12_static_unsigned_texture_signs &&
++      !shader.uses_register_dynamic_addressing() &&
++      !shader.texture_bindings().empty()) {
++    bool all_unsigned = true;
++    uint32_t checked_fetches = 0;
++    for (const auto& binding : shader.texture_bindings()) {
++      const uint32_t mask = uint32_t(1) << binding.fetch_constant;
++      if (checked_fetches & mask) {
++        continue;
++      }
++      checked_fetches |= mask;
++      const auto fetch = register_file_.GetTextureFetch(binding.fetch_constant);
++      if (fetch.type != xenos::FetchConstantType::kTexture ||
++          texture_util::SwizzleSigns(fetch) != 0) {
++        all_unsigned = false;
++        break;
++      }
++    }
++    if (all_unsigned) {
++      modification.pixel.dynamic_addressable_register_count = 1;
++    }
++  }
++  return modification.value;
+ }
+ 
+ bool PipelineCache::precise_interpolation_supported() const {
+--- a/src/xenia/gpu/spirv_shader_translator.h
++++ b/src/xenia/gpu/spirv_shader_translator.h
+@@ -43,7 +43,7 @@
+     // version number! Backends add it to their dated
+     // PipelineDescription::kVersion, so bumping either one is enough. Only
+     // ever raise it, a reverted layout change needs another bump.
+-    static constexpr uint32_t kVersion = 30;
++    static constexpr uint32_t kVersion = 32;
+ 
+     enum class DepthStencilMode : uint32_t {
+       kNoModifiers,
+@@ -109,6 +109,9 @@
+       uint32_t interpolators_centroid : xenos::kMaxInterpolators;
+       // uint32_t 1.
+       // Dynamically indexable register count from SQ_PROGRAM_CNTL. Max 64.
++      // For shaders without register indexing (where this is otherwise zero
++      // and never sizes registers), 1 selects all-unsigned texture signs.
++      // The pipeline checks every used fetch constant before selecting it.
+       uint32_t dynamic_addressable_register_count : 7;
+       uint32_t param_gen_enable : 1;
+       uint32_t param_gen_interpolator : 4;
+--- a/src/xenia/gpu/spirv_shader_translator_fetch.cc
++++ b/src/xenia/gpu/spirv_shader_translator_fetch.cc
+@@ -1804,6 +1804,15 @@
+                                    spv::StorageClassUniform,
+                                    uniform_system_constants_, id_vector_temp_),
+                                spv::NoPrecision);
++      if (is_pixel_shader() &&
++          !current_shader().uses_register_dynamic_addressing() &&
++          GetSpirvShaderModification().pixel.dynamic_addressable_register_count ==
++              1) {
++        // The pipeline key selected this only after checking every used fetch
++        // with the same SwizzleSigns helper as TextureCache. The other bytes
++        // in this word aren't read by this instruction.
++        swizzled_signs_word = const_uint_0_;
++      }
+       uint32_t swizzled_signs_word_offset = 8 * (fetch_constant_index & 3);
+ 
+       spv::Builder::TextureParameters texture_parameters = {};
+--- a/src/xenia/gpu/trace_dump.cc
++++ b/src/xenia/gpu/trace_dump.cc
+@@ -17,6 +17,7 @@
+ #include "xenia/base/profiling.h"
+ #include "xenia/base/string.h"
+ #include "xenia/base/threading.h"
++#include "xenia/base/xxhash.h"
+ #include "xenia/config.h"
+ #include "xenia/gpu/command_processor.h"
+ #include "xenia/gpu/graphics_system.h"
+@@ -88,6 +89,10 @@
+ DEFINE_uint32(trace_dump_memory_base, 0,
+               "Guest physical address the memory dump starts at.", "GPU.Debug");
+ 
++DEFINE_bool(trace_dump_memory_digest, false,
++            "Log a bounded guest-memory digest after repeated-frame playback "
++            "and screenshot synchronization, without writing a memory dump.",
++            "GPU.Debug");
+ DEFINE_bool(trace_dump_memory_series, false,
+             "Also write guest memory alongside every image dumped by "
+             "trace_dump_interval.",
+@@ -239,6 +244,18 @@
+     // Initial snapshots are replayed on each pass; pipeline caches stay warm.
+     int result =
+         CaptureToPng(base_output_path_.replace_extension(".png")) ? 0 : 1;
++    if (!result && cvars::trace_dump_memory_digest) {
++      const uint32_t base = cvars::trace_dump_memory_base;
++      const uint32_t size = cvars::trace_dump_memory_size;
++      if (!size || base >= 0x20000000 || size > 0x20000000 - base) {
++        XELOGE("Trace memory digest: invalid physical-memory bounds");
++        return 1;
++      }
++      const uint64_t hash = XXH3_64bits(
++          emulator_->memory()->physical_membase() + base, size);
++      XELOGI("Trace memory digest: {:08X}/{} bytes = {:016X}",
++             base, size, hash);
++    }
+     XELOGI("Trace repeat complete: {} passes; final image {}",
+            cvars::trace_dump_repeat_count, result ? "failed" : "written");
+     player_.reset();

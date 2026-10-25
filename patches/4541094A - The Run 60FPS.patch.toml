@@ -1,0 +1,60 @@
+title_name = "Need for Speed: The Run (NFS.Main.xex)"
+title_id = "4541094A"
+hash = "B833F1869FAA9190"
+
+[[patch]]
+name = "60 FPS stable simulation and fast frames"
+desc = "Media 264F3B05 only. Preserve native 30-Hz simulation, use StableTicksFastFrames for the client render clock, and set MaxVariableFps to 60. Replaces the unsuccessful global 60-Hz clock changes. Gameplay and movie speed need owner verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+# Preserve the constructor simulation-rate argument; select 60 variable frames,
+# 30 simulation ticks, and fixed simulation stepping on its actual settings.
+
+[[patch.be32]]
+address = 0x83510144
+value = 0x486C66BC
+
+[[patch.be32]]
+address = 0x83BD6800
+value = 0x93DF002C
+
+[[patch.be32]]
+address = 0x83BD6804
+value = 0x3D404270
+
+[[patch.be32]]
+address = 0x83BD6808
+value = 0x915E0028
+
+[[patch.be32]]
+address = 0x83BD680C
+value = 0x3D4041F0
+
+[[patch.be32]]
+address = 0x83BD6810
+value = 0x915E0024
+
+[[patch.be32]]
+address = 0x83BD6814
+value = 0x39400000
+
+[[patch.be32]]
+address = 0x83BD6818
+value = 0x995E003E
+
+[[patch.be32]]
+address = 0x83BD681C
+value = 0x995E0040
+
+[[patch.be32]]
+address = 0x83BD6820
+value = 0x3D4082A0
+
+[[patch.be32]]
+address = 0x83BD6824
+value = 0x4B939924
+
+[[patch.be32]]
+address = 0x82DF78FC
+value = 0x38C00004

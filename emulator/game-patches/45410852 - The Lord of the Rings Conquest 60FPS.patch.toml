@@ -1,0 +1,18 @@
+title_name = "The Lord of the Rings: Conquest"
+title_id = "45410852"
+hash = "FFA8A4695F7FC499"
+# Installed PAL disc, media 46B1AEB5; original base executable.
+
+[[patch]]
+name = "60 FPS presentation interval"
+desc = "Use one vblank instead of two in the game's presentation parameters. Simulation clocks and timestep constants are unchanged. Pair with a 60 FPS host limit; sustained performance requires gameplay verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x82529084
+value = 0x38C00001 # li r6,1; originally 0x38C00002 / li r6,2
+# 82529070 forms 0x166C0; 82529090 stores r6 to object+0x166C0.
+# Presentation parameters start at object+0x1668C (82528FC4), so this
+# is their +0x34 PresentationInterval field. The same block is passed
+# as r7 to D3D device creation at 82531190..825311A0.

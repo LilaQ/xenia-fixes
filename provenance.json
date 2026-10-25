@@ -1,0 +1,110 @@
+[
+  {
+    "repository": "LilaQ/xenia-cab-fixes",
+    "commit": "f1d9496396114296e9c5b93001b8bb2685ad53cd",
+    "directory": "emulator",
+    "files": 160
+  },
+  {
+    "repository": "LilaQ/xenia-edge-pixel-fetch-fix",
+    "commit": "1c2d4b4ec039b0ae27304a1352652dd836de514f",
+    "directory": "emulator/pixel-fetch-residency",
+    "files": 25
+  },
+  {
+    "repository": "LilaQ/resident-evil-revelations2-fps-patch",
+    "commit": "bda729adca439d86b6aa5ff8d620fa496ad39867",
+    "directory": "games/resident-evil-revelations-2",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/resident-evil-revelations-fps-patch",
+    "commit": "a925fc420b3e66051a78e329b19ca03ec04b4e22",
+    "directory": "games/resident-evil-revelations",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/rock-band-3-crypto-patch",
+    "commit": "cbaf442fab05297f07f356f9a207824c2a17e781",
+    "directory": "games/rock-band-3",
+    "files": 10
+  },
+  {
+    "repository": "LilaQ/rock-band-2-boot-patch",
+    "commit": "e41c978efc1f4345748ad79f542b492bc38ffdc0",
+    "directory": "games/rock-band-2",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/resident-evil-6-fps-patch",
+    "commit": "44bb4157aae5da36fb30c462b4db208764cf4968",
+    "directory": "games/resident-evil-6",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/resident-evil-5-fps-patch",
+    "commit": "12af313ddd249595b9d76a540394f6ec5f086f85",
+    "directory": "games/resident-evil-5",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/worms-ultimate-mayhem-fps-patch",
+    "commit": "516199b00eb92ff2462e6d785d9988d9b8761a21",
+    "directory": "games/worms-ultimate-mayhem",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/wolfenstein-fps-patch",
+    "commit": "8a6573669f2f7fdd0a078b991378a3c1ac14ad8f",
+    "directory": "games/wolfenstein",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/silent-hill-hd-patches",
+    "commit": "d713120e4bb5df91c448001d67cedc4bba49268e",
+    "directory": "games/silent-hill",
+    "files": 11
+  },
+  {
+    "repository": "LilaQ/xenia-la-noire-fps-patch",
+    "commit": "d351c48a1ad143c585cd67e6be3613d55397bfe3",
+    "directory": "games/la-noire",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/xenia-patch-manager",
+    "commit": "e331992af70cab006bd00300221ca16de0a0d90e",
+    "directory": "tools/patch-manager",
+    "files": 10
+  },
+  {
+    "repository": "LilaQ/xenia-mafia2-fps-patch",
+    "commit": "7ea5047c7a4dbe68fa274253180101328e4a27fc",
+    "directory": "games/mafia-ii",
+    "files": 4
+  },
+  {
+    "repository": "LilaQ/xenia-just-cause-fixes",
+    "commit": "4b4e58cbaae6872ecc00462257d6ec6e75a38e92",
+    "directory": "games/just-cause",
+    "files": 18
+  },
+  {
+    "repository": "LilaQ/xenia-hitman-hd-fps-patches",
+    "commit": "b11076bb19063a19f4fb1aaa2a28a6aa798cffa4",
+    "directory": "games/hitman-hd",
+    "files": 7
+  },
+  {
+    "repository": "LilaQ/xenia-hitman-water-fix",
+    "commit": "fdd50bf5d8624521da91aa3c933c4171daa1a29f",
+    "directory": "games/hitman-absolution",
+    "files": 25
+  },
+  {
+    "repository": "LilaQ/xenia-xxl-runtime-patch",
+    "commit": "35d9dca7bfdbaad7423998a4cb1ac0da375dda9b",
+    "directory": "games/xxl",
+    "files": 11
+  }
+]

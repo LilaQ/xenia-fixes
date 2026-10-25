@@ -1,0 +1,13 @@
+title_name = "Medal of Honor: Airborne"
+title_id = "454107F6"
+hash = "496DAFC9BE3E5A9D"
+
+[[patch]]
+ name = "60 FPS"
+ desc = "Map the two-vblank D3D presentation interval to one. PAL base version 00000002. Runtime frame rate and game speed require verification."
+ author = "LilaQ"
+ is_enabled = true
+
+ [[patch.be32]]
+  address = 0x829B3504
+  value = 0x39400001

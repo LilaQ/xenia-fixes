@@ -1,0 +1,22 @@
+--- a/src/xenia/kernel/xam/xam_content.cc
++++ b/src/xenia/kernel/xam/xam_content.cc
+@@ -320,7 +320,8 @@
+   }
+ 
+   if (kernel_state()->file_system()->IsSymbolicLinkRegistered(symlink_path)) {
+-    return X_ERROR_INVALID_PARAMETER;
++    XELOGW("Content reopen: root={} flags={:08X}; reporting ALREADY_EXISTS", symlink_path, uint32_t(flags));
++    return X_ERROR_ALREADY_EXISTS;
+   }
+ 
+   XCONTENT_AGGREGATE_DATA content_data;
+@@ -416,6 +417,9 @@
+       *disposition_ptr = static_cast<uint32_t>(disposition);
+     }
+ 
++    if (result) {
++      XELOGW("Content open failed: root={} file={} type={:08X} flags={:08X} error={:08X}", root_name, content_data.file_name(), uint32_t(content_data.content_type.get()), uint32_t(flags), uint32_t(result));
++    }
+     if (result && overlapped_ptr) {
+       result = X_ERROR_FUNCTION_FAILED;
+     }

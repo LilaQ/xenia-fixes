@@ -1,0 +1,83 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -70 +70,2 @@
+-            "Snapshot recently CPU-read single-page resolves into a bounded "
++            "Snapshot recently CPU-read page-aligned resolves up to 64 KB into a "
++            "bounded "
+@@ -2546 +2547 @@
+-      length != 4096 || (address & 4095) ||
++      !length || length > 65536 || (length & 4095) || (address & 4095) ||
+@@ -2550,0 +2552,4 @@
++  auto owner = resolve_owners_.find(MakeReadbackResolveKey(address, length));
++  if (owner == resolve_owners_.end()) {
++    return;
++  }
+@@ -2564 +2569 @@
+-        !CreateReadbackStagingBuffer(snapshot.buffer, 4096)) {
++        !CreateReadbackStagingBuffer(snapshot.buffer, 65536)) {
+@@ -2571 +2576 @@
+-        4096);
++        length);
+@@ -2572,0 +2578,2 @@
++    snapshot.length = length;
++    snapshot.generation = owner->second.generation;
+@@ -2743 +2750,2 @@
+-      ranges.front().second != 4096 || (ranges.front().first & 4095)) {
++      !ranges.front().second || ranges.front().second > 65536 ||
++      (ranges.front().second & 4095) || (ranges.front().first & 4095)) {
+@@ -2747 +2755,2 @@
+-  auto owner = resolve_owners_.find(MakeReadbackResolveKey(address, 4096));
++  uint32_t length = ranges.front().second;
++  auto owner = resolve_owners_.find(MakeReadbackResolveKey(address, length));
+@@ -2749 +2758 @@
+-      owner->second.length != 4096 || !owner->second.copyable ||
++      owner->second.length != length || !owner->second.copyable ||
+@@ -2751 +2760 @@
+-          MakeReadbackResolveKey(address, 4096)) {
++          MakeReadbackResolveKey(address, length)) {
+@@ -2754 +2763,8 @@
+-  if (TryConsumeGatHdrSnapshot(address)) {
++  const uint64_t owner_key = MakeReadbackResolveKey(address, length);
++  for (uint32_t page = address >> 12, end = page + (length >> 12);
++       page < end; ++page) {
++    if (resolve_page_owners_[page].load(std::memory_order_relaxed) != owner_key) {
++      return false;
++    }
++  }
++  if (length == 4096 && TryConsumeGatHdrSnapshot(address)) {
+@@ -2758 +2774 @@
+-    if (snapshot.address != address ||
++    if (snapshot.address != address || snapshot.length != length ||
+@@ -2759,0 +2776 @@
++        snapshot.generation != owner->second.generation ||
+@@ -2775,0 +2793 @@
++      small_resolve_snapshot_bytes_ += length;
+@@ -2777,2 +2795,2 @@
+-        XELOGI("Resolve staged timing: 64 exact-owner page reads, wait/copy "
+-               "avg {:.3f} ms",
++        XELOGI("Resolve staged timing: 64 exact-owner bounded reads, wait/copy "
++               "avg {:.3f} ms; avg bytes {}",
+@@ -2780 +2798,3 @@
+-                   double(xe::Clock::QueryHostTickFrequency()) / 64.0);
++                   double(xe::Clock::QueryHostTickFrequency()) / 64.0,
++               small_resolve_snapshot_bytes_ / 64);
++        small_resolve_snapshot_bytes_ = 0;
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.h
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.h
+@@ -487 +487 @@
+-  // Bounded snapshots of single-page resolves recently consumed by the CPU.
++  // Bounded snapshots of page-aligned resolves up to 64 KB consumed by the CPU.
+@@ -492,0 +493,2 @@
++    uint32_t length = 0;
++    uint64_t generation = 0;
+@@ -499,0 +502 @@
++  uint64_t small_resolve_snapshot_bytes_ = 0;
+--- a/src/xenia/gpu/command_processor_resolve_readwatch.inc
++++ b/src/xenia/gpu/command_processor_resolve_readwatch.inc
+@@ -301,0 +302 @@
++    owner.generation = ++resolve_generation_;
+@@ -598,0 +600,2 @@
++  // Distinguishes repeated writes to the same destination in one submission.
++  uint64_t generation = 0;
+@@ -609,0 +613 @@
++uint64_t resolve_generation_ = 0;

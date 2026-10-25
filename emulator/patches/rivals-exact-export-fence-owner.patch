@@ -1,0 +1,40 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -3900,6 +3900,12 @@
+   }
+   rivals_pumping_event_fences_ = true;
+   const uint64_t completed = GetCompletedSubmission();
++  // MarkMemexportPagesWritten installs a new owner for every awaited export.
++  // Once that owner completes, subsequent ordinary event words need no wait.
++  if (!rivals_event_fences_.empty() && memexport_await_pending_ &&
++      memexport_staged_.empty() && memexport_awaited_submission_ <= completed) {
++    memexport_await_pending_ = false;
++  }
+   while (!rivals_event_fences_.empty() &&
+          rivals_event_fences_.front().submission <= completed) {
+     const RivalsEventFence fence = rivals_event_fences_.front();
+@@ -3925,16 +3931,16 @@
+   if (title_id != 0x454109C6) {
+     return false;
+   }
++  // Preserve the actual awaited export owner. Later, unrelated GPU work
++  // does not extend AwaitMemexportForFence's CPU-visibility dependency.
++  const uint64_t owner = memexport_awaited_submission_;
+   SubmitResolvesForGuestSync();
+-  if (!EndSubmission(false)) {
+-    return false;
+-  }
+-  // No empty submissions or GPU buffer copies for consecutive event words.
+-  // Publish each value only when the timeline proves all preceding exports
+-  // complete; command parsing can continue until then.
+-  const uint64_t owner = GetCurrentSubmission() - 1;
++  if (owner >= GetCurrentSubmission()) {
++    if (!EndSubmission(false) || owner >= GetCurrentSubmission()) {
++      return false;
++    }
++  }
+   rivals_event_fences_.push_back({owner, address, value});
+-  memexport_awaited_submission_ = owner;
+   PumpRivalsEventFences();
+   static thread_local uint64_t queued = 0;
+   if (++queued <= 4 ||

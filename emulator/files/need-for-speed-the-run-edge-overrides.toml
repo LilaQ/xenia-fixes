@@ -1,0 +1,27 @@
+# The Run PAL, media 264F3B05; NFS.Main.xex hash B833F1869FAA9190.
+# Experimental stable-ticks/fast-frames patch; accuracy fixes smoke per owner.
+[GPU]
+gpu = "d3d12"
+render_target_path = "accuracy"
+readback_resolve = true
+framerate_limit = 60
+guest_display_refresh_cap = false
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Kernel]
+guest_scheduler = true
+in_process_title_relaunch = true
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[UI]
+show_achievement_notification = true

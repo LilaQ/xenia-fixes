@@ -1,0 +1,8 @@
+# Canary settings for game-patches/415608B2 - Edge of Time 60FPS.patch.toml.
+# Default.xex hash 26011A843A5386C6; base 0.0.0.2, media 13B1B679.
+# Gameplay remained at about 30 FPS with 60 Hz emulator vblanks. Leave the
+# native 1/60-second frame timer intact and remove the additional vblank cap
+# for the next comparison. This is not a verified sustained-60-FPS result.
+[GPU]
+vsync = false
+framerate_limit = 0

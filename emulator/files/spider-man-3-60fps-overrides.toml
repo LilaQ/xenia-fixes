@@ -1,0 +1,12 @@
+# Base version 0.0.0.1, media 5E753988, Default.xex 74EB693009B1AF55.
+# Use with game-patches/415607E2 - Spider-Man 3 60FPS.patch.toml.
+# The initial interval at 8284DFD4 is later overwritten by the startup mode-2
+# selection at 82833D60. The patch selects mode 1 at that later call instead.
+# Preserve full readback for the game's lighting.
+[GPU]
+vsync = false
+framerate_limit = 60
+readback_resolve = "full"
+
+[General]
+time_scalar = 1

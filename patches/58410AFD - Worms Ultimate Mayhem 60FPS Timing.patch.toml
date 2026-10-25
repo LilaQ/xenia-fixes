@@ -1,0 +1,13 @@
+title_name = "Worms Ultimate Mayhem"
+title_id = "58410AFD"
+hash = "D6BB8FBE542043A8"
+
+[[patch]]
+    name = "60 FPS simulation timing (requires 60 FPS rendering)"
+    desc = "Changes simulation duration from 33 to 16 ms per rendered frame. Use only with actual 60 FPS rendering: vsync=false, framerate_limit=120 and readback_resolve=none in Canary. This does not unlock rendering; at 30 FPS it slows gameplay."
+    author = "LilaQ"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x822890B0
+        value = 0x39400010

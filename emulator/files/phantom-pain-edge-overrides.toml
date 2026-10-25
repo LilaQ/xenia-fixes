@@ -1,0 +1,29 @@
+# The Phantom Pain, title 4B4E085E.
+# Ground Zeroes owner-tested Edge baseline, not yet runtime-verified for this title.
+# 120 output limit is documented as 60 game FPS in xenia-manager settings/4B4E085E.toml.
+[Content]
+# Preserve the original value; forcing licenses did not fix installation detection.
+license_mask = 0
+
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+framerate_limit = 120
+guest_display_refresh_cap = true
+occlusion_query = "fast"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[UI]
+show_achievement_notification = true

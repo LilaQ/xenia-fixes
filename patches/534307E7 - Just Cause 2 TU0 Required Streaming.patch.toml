@@ -1,0 +1,36 @@
+title_name = "Just Cause 2"
+title_id = "534307E7"
+hash = "12134BD1769BFB2B"
+# TU0, Media ID 57290BAA. Original instruction at the hook: 91610050.
+# 82E662C0 is zero padding after .text inside the final executable XEX page.
+# Checked against both the original virtual image and live memory.
+
+[[patch]]
+    name = "Request required world chunks before waiting (experimental)"
+    desc = "Marks unloaded, enabled world chunks selected by the relocation wait list as requested. Keeps the resource-completion check intact. Test the initial loading transition before enabling the separate FPS patch."
+    author = "Local cabinet patch"
+    is_enabled = false
+
+    [[patch.be32]]
+        address = 0x82E662C0
+        value = 0x892B0014 # lbz r9,0x14(r11): existing chunk flags
+
+    [[patch.be32]]
+        address = 0x82E662C4
+        value = 0x61290080 # ori r9,r9,0x80: request streaming; retain every other flag
+
+    [[patch.be32]]
+        address = 0x82E662C8
+        value = 0x992B0014 # stb r9,0x14(r11): store requested flag
+
+    [[patch.be32]]
+        address = 0x82E662CC
+        value = 0x91610050 # stw r11,0x50(r1): original displaced instruction
+
+    [[patch.be32]]
+        address = 0x82E662D0
+        value = 0x4B4C0314 # b 0x823265E4: continue appending the chunk to the wait list
+
+    [[patch.be32]]
+        address = 0x823265E0
+        value = 0x48B3FCE0 # b 0x82E662C0: hook only the selected required-chunk path

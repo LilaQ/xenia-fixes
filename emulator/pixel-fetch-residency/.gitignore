@@ -1,0 +1,9 @@
+*.exe
+*.bin
+*.obj
+*.o
+__pycache__/
+test_before
+test_after
+*.log
+launchbox-prepared/

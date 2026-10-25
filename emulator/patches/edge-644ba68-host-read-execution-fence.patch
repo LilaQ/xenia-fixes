@@ -1,0 +1,30 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -40,6 +40,11 @@
+             "Use bindless resources where available - may improve performance, "
+             "but may make debugging more complicated.",
+             "D3D12");
++
++DEFINE_bool(d3d12_await_host_buffer_reads, false,
++            "Wait at guest execution fences for draws reading the host-imported "
++            "guest RAM buffer, so the guest cannot reuse their inputs early.",
++            "GPU");
+ 
+ DEFINE_bool(trace_draw_timing, false,
+             "Record bounded per-draw GPU timestamps for trace replay analysis; "
+@@ -3735,6 +3740,15 @@
+   // Pop debug marker for draw call.
+   PopDebugMarker();
+ 
++  // Host-routed consumers also read CPU-backed guest RAM. Their inputs must
++  // remain in use until execution finishes, even if the draw produces no export.
++  // Defer the wait to an existing guest execution fence or interrupt rather
++  // than serializing each draw against the GPU.
++  if (cvars::d3d12_await_host_buffer_reads && route_to_host && submission_open_) {
++    memexport_awaited_submission_ = GetCurrentSubmission();
++    memexport_await_pending_ = true;
++  }
++
+   if (memexport_used) {
+     InsertDebugMarker("Memexport draw: %zu ranges", memexport_ranges_.size());
+     // Make sure this memexporting draw is ordered with other work using shared

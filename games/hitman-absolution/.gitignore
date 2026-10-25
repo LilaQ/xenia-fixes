@@ -1,0 +1,12 @@
+*.exe
+*.dll
+*.obj
+*.bin
+*.dxil
+*.ll
+*.rdc
+*.png
+__pycache__/
+.venv/
+test-runtime/
+*.log

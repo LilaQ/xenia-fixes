@@ -1,0 +1,26 @@
+# Ground Zeroes, title 4B4E085C, media 085097D1, default.xex 48521100C591EB1C.
+# Native 60-FPS Edge comparison. Canary report uses a 120 host limit for 60 game FPS.
+# https://github.com/xenia-canary/game-compatibility/issues/531
+# No speculative game-code timing patch. Actual Edge FPS remains unverified.
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+framerate_limit = 120
+guest_display_refresh_cap = true
+occlusion_query = "fast"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[UI]
+show_achievement_notification = true

@@ -1,0 +1,40 @@
+[D3D12]
+d3d12_adapter = -1
+d3d12_stage_small_readback = true
+d3d12_stencil_plane_copy = true
+d3d12_partial_cube_mips = true
+d3d12_partial_atlas_upload = true
+d3d12_submission_timing = false
+d3d12_draw_timing = false
+d3d12_stage_timing = false
+d3d12_texture_load_timing = false
+
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = true
+occlusion_query = "fast"
+framerate_limit = 60
+guest_display_refresh_cap = false
+host_frame_pacing_precise = true
+d3d12_rivals_gpu_atlas_coherency = true
+d3d12_rivals_gpu_event_fences = true
+resolve_resolution_scale_fill_half_pixel_offset = true
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[GPU.Debug]
+d3d12_static_unsigned_texture_signs = true
+d3d12_transfer_static_source_pitch = false
+
+[Kernel]
+guest_scheduler = true
+
+[Display]
+fullscreen = true
+
+[UI]
+show_achievement_notification = true
+
+[HID]
+hid = "sdl"

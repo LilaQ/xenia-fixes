@@ -1,0 +1,13 @@
+title_name = "Red Dead Redemption GOTY TU1 (Disc 1)"
+title_id = "5454082B"
+hash = "D16175F24AF34798" # GOTY Disc 1 with title update 0.0.1.12
+
+[[patch]]
+name = "60 FPS"
+desc = "Changes the TU1 display divisor from 2 to 1. Requires a 60 FPS host limit."
+author = "boma; TU1 address port: Codex"
+is_enabled = true
+
+[[patch.be8]]
+address = 0x82c20bef # TU1 original: 0x02
+value = 0x01

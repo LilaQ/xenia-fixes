@@ -1,0 +1,29 @@
+title_name = "Saints Row: Gat Out of Hell"
+title_id = "4B4D0800"
+hash = "DC470096D97A0450"
+
+[[patch]]
+name = "Single-sample 720p scene"
+desc = "Disable presentation MSAA and use the native full-frame, single-sample layout for the 720p scene entry normally configured for 2x MSAA in two tiles. Preserves native image dimensions and unrelated presentation flags."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x82F5FD98
+value = 0x39400000
+
+[[patch.be32]]
+address = 0x82F5FD9C
+value = 0x915F000C
+
+[[patch.be32]]
+address = 0x8311BE54
+value = 0x00000000
+
+[[patch.be32]]
+address = 0x8311BE60
+value = 0x00000001
+
+[[patch.be32]]
+address = 0x8311BE70
+value = 0x00000500

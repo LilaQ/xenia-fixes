@@ -1,0 +1,236 @@
+diff --git a/src/xenia/kernel/xam/xam_input.cc b/src/xenia/kernel/xam/xam_input.cc
+index ffb1e13..3a20b4c 100644
+--- a/src/xenia/kernel/xam/xam_input.cc
++++ b/src/xenia/kernel/xam/xam_input.cc
+@@ -7,13 +7,17 @@
+  ******************************************************************************
+  */
+ 
++#include <array>
++#include <atomic>
++
+ #include "xenia/base/logging.h"
+ #include "xenia/emulator.h"
+ #include "xenia/hid/input.h"
+ #include "xenia/hid/input_system.h"
+ #include "xenia/kernel/kernel_state.h"
+-#include "xenia/kernel/util/shim_utils.h"
+ #include "xenia/kernel/xam/xam_private.h"
++#include "xenia/kernel/xboxkrnl/xboxkrnl_mic.h"
++#include "xenia/kernel/util/shim_utils.h"
+ #include "xenia/ui/virtual_key.h"
+ #include "xenia/xbox.h"
+ 
+@@ -289,18 +293,39 @@ DECLARE_XAM_EXPORT1(XamInputGetKeystrokeHud, kInput, kImplemented);
+ X_HRESULT_result_t XamUserGetDeviceContext_entry(dword_t user_index,
+                                                  dword_t device_type,
+                                                  lpdword_t out_ptr) {
+-  // Games check the result - usually with some masking.
+-  // If this function fails they assume zero, so let's fail AND
+-  // set zero just to be safe.
+   *out_ptr = 0;
++  if (device_type == X_USER_DEVICE_CLASS::DEVICE_CLASS_MIC &&
++      cvars::allow_mic_initialization) {
++    bool available = false;
++    if (user_index < XUserMaxUserCount) {
++      available = xboxkrnl::IsMicDeviceAvailable(user_index);
++      static std::array<std::atomic<bool>, XUserMaxUserCount> logged{};
++      if (!logged[user_index].exchange(true)) {
++        XELOGI("XMic: device context for user {}: capture available={}",
++               static_cast<uint32_t>(user_index), available);
++      }
++    } else if ((user_index & XUserIndexAny) == XUserIndexAny) {
++      for (uint32_t slot = 0; slot < XUserMaxUserCount; ++slot) {
++        if (xboxkrnl::IsMicDeviceAvailable(slot)) {
++          available = true;
++          break;
++        }
++      }
++    }
++    if (available) {
++      // Host microphones are independent capture endpoints. Let a game query
++      // one before a separate profile has signed in to that player slot.
++      const uint32_t slot = user_index < XUserMaxUserCount
++                                ? static_cast<uint32_t>(user_index)
++                                : 0;
++      *out_ptr = X_USER_DEVICE_TYPE::DEVICE_TYPE_MIC_2 | slot;
++      return X_E_SUCCESS;
++    }
++  }
++  // Keep the regular device context behavior for non-microphone devices.
+   if (kernel_state()->xam_state()->IsUserSignedIn(user_index) ||
+       (user_index & XUserIndexAny) == XUserIndexAny) {
+-    if (device_type == X_USER_DEVICE_CLASS::DEVICE_CLASS_MIC &&
+-        cvars::allow_mic_initialization) {  // Microphone
+-      *out_ptr = X_USER_DEVICE_TYPE::DEVICE_TYPE_MIC_2;
+-    } else {
+-      *out_ptr = (uint32_t)user_index;
+-    }
++    *out_ptr = static_cast<uint32_t>(user_index);
+     return X_E_SUCCESS;
+   } else {
+     return X_E_DEVICE_NOT_CONNECTED;
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_mic.h b/src/xenia/kernel/xboxkrnl/xboxkrnl_mic.h
+new file mode 100644
+index 0000000..79dfcdb
+--- /dev/null
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_mic.h
+@@ -0,0 +1,10 @@
++#pragma once
++
++#include <cstdint>
++
++namespace xe::kernel::xboxkrnl {
++
++// A connected host capture endpoint assigned to this Xbox microphone slot.
++bool IsMicDeviceAvailable(uint32_t user_index);
++
++}  // namespace xe::kernel::xboxkrnl
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+index 33ce548..1837a2a 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+@@ -22,8 +22,9 @@
+ #include "xenia/base/threading.h"
+ #include "xenia/cpu/lzx.h"
+ #include "xenia/cpu/processor.h"
+-#include "xenia/kernel/util/shim_utils.h"
++#include "xenia/kernel/xboxkrnl/xboxkrnl_mic.h"
+ #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
++#include "xenia/kernel/util/shim_utils.h"
+ #include "xenia/kernel/xthread.h"
+ #include "xenia/xbox.h"
+ 
+@@ -33,20 +34,20 @@ DEFINE_bool(allow_mic_initialization, false,
+             "Expose a host capture device to Xbox 360 microphone games",
+             "Kernel");
+ DEFINE_string(mic_device_name, "",
+-              "Capture device name filter; empty selects a USB microphone if "
+-              "present, otherwise the system default",
++              "Optional capture device name filter; empty automatically "
++              "selects a microphone",
+               "Kernel");
+ DEFINE_string(mic_device_name_2, "",
+-              "Capture device name filter for microphone 2; empty selects "
+-              "another USB microphone",
++              "Optional capture device name filter for microphone 2; empty "
++              "automatically selects another microphone",
+               "Kernel");
+ DEFINE_string(mic_device_name_3, "",
+-              "Capture device name filter for microphone 3; empty selects "
+-              "another USB microphone",
++              "Optional capture device name filter for microphone 3; empty "
++              "automatically selects another microphone",
+               "Kernel");
+ DEFINE_string(mic_device_name_4, "",
+-              "Capture device name filter for microphone 4; empty selects "
+-              "another USB microphone",
++              "Optional capture device name filter for microphone 4; empty "
++              "automatically selects another microphone",
+               "Kernel");
+ 
+ namespace xe {
+@@ -193,48 +194,69 @@ class MicCapture {
+           cvars::mic_device_name_3, cvars::mic_device_name_4};
+       std::array<ma_uint32, 4> assigned;
+       assigned.fill(capture_count);
++      const auto is_monitor = [&](ma_uint32 candidate) {
++        const std::string name = lowercase(capture[candidate].name);
++        return name.find("stereo mix") != std::string::npos ||
++               name.find("stereomix") != std::string::npos ||
++               name.find("what u hear") != std::string::npos ||
++               name.find("wave out mix") != std::string::npos ||
++               name.find("loopback") != std::string::npos ||
++               name.find("monitor of ") != std::string::npos;
++      };
++      const auto is_microphone = [&](ma_uint32 candidate) {
++        const std::string name = lowercase(capture[candidate].name);
++        return name.find("microphone") != std::string::npos ||
++               name.find("mikrofon") != std::string::npos ||
++               name.find("mic") != std::string::npos ||
++               name.find("headset") != std::string::npos;
++      };
+       for (uint32_t slot = 0; slot <= index_; ++slot) {
+         const auto taken = [&](ma_uint32 candidate) {
+           return std::find(assigned.begin(), assigned.begin() + slot,
+                            candidate) != assigned.begin() + slot;
+         };
+-        const std::string wanted = lowercase(
+-            filters[slot].empty() ? "usb" : filters[slot]);
+-        for (ma_uint32 i = 0; i < capture_count; ++i) {
+-          if (!taken(i) &&
+-              lowercase(capture[i].name).find(wanted) != std::string::npos) {
+-            assigned[slot] = i;
+-            break;
++        if (!filters[slot].empty()) {
++          const std::string wanted = lowercase(filters[slot]);
++          for (ma_uint32 i = 0; i < capture_count; ++i) {
++            if (!taken(i) && !is_monitor(i) &&
++                lowercase(capture[i].name).find(wanted) != std::string::npos) {
++              assigned[slot] = i;
++              break;
++            }
+           }
+         }
+         if (assigned[slot] != capture_count) {
+           continue;
+         }
++        if (!filters[slot].empty()) {
++          XELOGW("XMic: capture device '{}' not found; selecting automatically",
++                 filters[slot]);
++        }
++        // Prefer the Windows default only for player one. Remaining player
++        // slots receive distinct microphone endpoints in enumeration order.
+         if (slot == 0) {
+-          if (!filters[slot].empty()) {
+-            XELOGW("XMic: capture device '{}' not found; using system default",
+-                   filters[slot]);
++          for (ma_uint32 i = 0; i < capture_count; ++i) {
++            if (!is_monitor(i) && capture[i].isDefault) {
++              assigned[slot] = i;
++              break;
++            }
+           }
++        }
++        if (assigned[slot] == capture_count) {
+           for (ma_uint32 i = 0; i < capture_count; ++i) {
+-            if (capture[i].isDefault) {
++            if (!taken(i) && !is_monitor(i) && is_microphone(i)) {
+               assigned[slot] = i;
+               break;
+             }
+           }
+-        } else if (filters[slot].empty()) {
+-          // A device with a non-USB name is safe to auto-select only when it
+-          // is the sole remaining capture endpoint.
+-          ma_uint32 remaining = capture_count;
++        }
++        if (assigned[slot] == capture_count) {
+           for (ma_uint32 i = 0; i < capture_count; ++i) {
+-            if (!taken(i)) {
+-              if (remaining != capture_count) {
+-                remaining = capture_count;
+-                break;
+-              }
+-              remaining = i;
++            if (!taken(i) && !is_monitor(i)) {
++              assigned[slot] = i;
++              break;
+             }
+           }
+-          assigned[slot] = remaining;
+         }
+       }
+       const ma_uint32 selected_index = assigned[index_];
+@@ -378,6 +400,11 @@ MicCapture& mic_capture(uint32_t index) {
+   return captures[index];
+ }
+ 
++bool IsMicDeviceAvailable(uint32_t user_index) {
++  return cvars::allow_mic_initialization && user_index < XUserMaxUserCount &&
++         mic_capture(user_index).Available();
++}
++
+ void KeEnableFpuExceptions_entry(
+     const ppc_context_t& ctx) {  // dword_t enabled) {
+   // TODO(benvanik): can we do anything about exceptions?

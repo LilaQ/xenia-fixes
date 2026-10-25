@@ -1,0 +1,12 @@
+title_name = "Star Wars: The Force Unleashed II"
+title_id = "4C4107F2"
+hash = "0C35DD8FCC1766CD"
+
+[[patch]]
+name = "60 FPS frame-lock initialization"
+desc = "Set the engine frame lock and simulation timestep to 60 Hz. Pair with the TFU2 performance-renderer config, an uncapped guest display and a 60 FPS host limit; insufficient throughput causes slow motion. Base executable only."
+is_enabled = true
+
+[[patch.be32]]
+address = 0x8223626C
+value = 0x3960003C

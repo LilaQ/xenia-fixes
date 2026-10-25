@@ -1,0 +1,9 @@
+# Base version 0.0.0.3, media 3B914714, Default.xex EBC52D83EFDAE42D.
+# Native 60-FPS gameplay; do not change its fixed simulation timestep.
+# https://github.com/xenia-canary/game-compatibility/issues/665
+[GPU]
+vsync = true
+framerate_limit = 60
+
+[General]
+time_scalar = 1

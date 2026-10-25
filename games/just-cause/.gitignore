@@ -1,0 +1,10 @@
+__pycache__/
+*.iso
+*.xex
+*.pe
+*.log
+.DS_Store
+diagnostics/JC2-Aufnahme-*/
+diagnostics/JC2-Zustand-*/
+*.etl
+diagnostics/JC2-Live/

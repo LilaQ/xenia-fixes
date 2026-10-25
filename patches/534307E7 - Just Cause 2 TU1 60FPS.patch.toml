@@ -1,0 +1,60 @@
+title_name = "Just Cause 2"
+title_id = "534307E7"
+hash = "6CDA2880AB433BFF"
+# Media ID 57290BAA, TU1 executable version 0.0.1.1.
+# Official update reconstructed locally; code hash matches the loaded module
+# after the same kernel-import thunk rewrites as Xenia.
+
+[[patch]]
+    name = "60 FPS presentation interval (TU1)"
+    desc = "Selects interval one during D3D device creation and the engine's runtime presentation-mode update. Keep the guest vblank rate capped at 60 Hz, framerate_limit = 60 and time_scalar = 1. Verify gameplay and cutscene timing; actual FPS remain limited by hardware."
+    author = "Local cabinet patch"
+    is_enabled = false
+
+    [[patch.be32]]
+        address = 0x82BD9004
+        value = 0x3BC00001 # li r30,1; original li r30,2 / 0x3BC00002
+        # At 82BD9038, r30 is stored at r1+0x104. Presentation parameters
+        # start at r1+0xD0: this is their +0x34 PresentationInterval field.
+
+    [[patch.be32]]
+        address = 0x82BE52B0
+        value = 0x38800001 # li r4,1; original lwzx r4,r9,r8 / 0x7C89402E
+        # The engine subsequently selects an interval from 832645A8 and
+        # calls 821CEA30, which writes it to the D3D device at +0x35EC.
+        # Without this change the runtime update can overwrite the start value.
+
+[[patch]]
+    name = "Immediate presentation with host 60 FPS limit (TU1 test)"
+    desc = "Use the game's existing immediate-presentation mode instead of interval one. Keep Edge framerate_limit = 60 and time_scalar = 1. This isolates guest VSync pacing; measured 60 FPS and normal gameplay timing still require testing. Enable only one presentation patch."
+    author = "Local cabinet patch"
+    is_enabled = false
+
+    [[patch.be32]]
+        address = 0x82BD9004
+        value = 0x3FC08000 # lis r30,0x8000; same mode as original 82BD901C
+
+    [[patch.be32]]
+        address = 0x82BE52B0
+        value = 0x3C808000 # lis r4,0x8000; interval table's immediate entry
+
+[[patch]]
+    name = "60 FPS engine timer and immediate presentation (TU1)"
+    desc = "Reduce the main update-loop budget from 33333 to 16667 microseconds, and select the existing immediate-presentation mode. Keep framerate_limit = 60 and time_scalar = 1. Changes frame pacing, not the game clock speed. Enable only one presentation variant; actual FPS and gameplay timing require runtime verification."
+    author = "Local cabinet patch"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x82214400
+        value = 0x6128411B # ori r8,r9,16667; original 0x61288235 = 33333 us
+        # 82214408-82214428 converts this budget to timebase ticks and
+        # stores it at 832958F8. The next update sleeps for its remaining
+        # budget at 822143C8, independently of the presentation interval.
+
+    [[patch.be32]]
+        address = 0x82BD9004
+        value = 0x3FC08000 # lis r30,0x8000; existing immediate mode
+
+    [[patch.be32]]
+        address = 0x82BE52B0
+        value = 0x3C808000 # lis r4,0x8000; runtime presentation update

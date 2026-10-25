@@ -1,0 +1,503 @@
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+index 21552e1..a8b2bcd 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_misc.cc
+@@ -7,7 +7,16 @@
+  ******************************************************************************
+  */
+
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <cctype>
++#include <chrono>
++#include <condition_variable>
++#include <cstring>
+ #include <memory>
++#include <mutex>
++#include <string>
+
+ #include "xenia/base/math.h"
+ #include "xenia/cpu/lzx.h"
+@@ -17,10 +26,15 @@
+ #include "xenia/kernel/xthread.h"
+ #include "xenia/xbox.h"
+
++#include "third_party/miniaudio/miniaudio.h"
++
+ DEFINE_bool(allow_mic_initialization, false,
+-            "Enable Mic Initialization\n"
+-            " Only set true when testing mic related functions",
++            "Expose a host capture device to Xbox 360 microphone games",
+             "Kernel");
++DEFINE_string(mic_device_name, "",
++              "Capture device name filter; empty selects a USB microphone if "
++              "present, otherwise the system default",
++              "Kernel");
+
+ namespace xe {
+ namespace kernel {
+@@ -30,6 +44,8 @@ enum class XMicRequestType : uint16_t {
+   MicGetStatus = 0x0000,
+   MicStart = 0x0001,
+   MicSetGain = 0x0002,
++  MicBeginRecording = 0x0004,
++  MicStop = 0x0005,
+   MicGetData = 0x0007,
+   MicGetSampleRates = 0x0008,
+   MicGetCapabilities = 0x0009,
+@@ -53,10 +69,10 @@ struct X_MIC_INFO {
+   // other than MicGetStatus. Seems like there is also an event object which
+   // creation isn't reported via kernel call.
+   xe::be<uint32_t> unk1;            // 8
+-  xe::be<uint32_t> event_ptr;       // 0xC
++  xe::be<uint32_t> context_ptr;     // 0xC
+   xe::be<uint32_t> completion_ptr;  // 0x10
+-  xe::be<uint32_t> unk4;            // 0x14
+ };
++static_assert_size(X_MIC_INFO, 0x14);
+
+ struct X_MIC_CAPABILITIES {
+   /* Hardcoded fields for 0x6000 type aka. MicDevice. 0x5000 type (Rmc) does not
+@@ -68,20 +84,204 @@ struct X_MIC_CAPABILITIES {
+   xe::be<uint16_t> channels;
+   xe::be<uint32_t> sample_rates;
+   xe::be<uint16_t> bits_per_sample;
+-  xe::be<uint16_t> frame_length;
++  xe::be<uint16_t> reserved_0e;
++  xe::be<uint32_t> frame_length;
+   xe::be<uint8_t> mic_color;
++  uint8_t reserved_15;
+   xe::be<uint16_t> vendor_id;
+   xe::be<uint16_t> product_id;
+   xe::be<uint16_t> revision;
+-  xe::be<uint32_t> device_id;
+ };
+ static_assert_size(X_MIC_CAPABILITIES, 0x1C);
++static_assert(offsetof(X_MIC_CAPABILITIES, frame_length) == 0x10);
+
+ struct X_MIC_DEVICE {
+   X_MIC_INFO info;
+-  // There seems to be one huge union here that depends on the request type.
++  // The request payload starts at 0x14. Its shape depends on request_type.
+   X_MIC_CAPABILITIES capabilities;
+ };
++static_assert(offsetof(X_MIC_DEVICE, capabilities) == 0x14);
++
++// USB XMic frames are 1 ms of mono 48 kHz, 16-bit little-endian PCM. miniaudio
++// converts the selected host input to the requested rate and channel count.
++class MicCapture {
++ public:
++  static constexpr uint32_t kSampleRate = 48000;
++  static constexpr uint32_t kSamplesPerFrame = 48;
++  static constexpr uint32_t kBytesPerFrame = kSamplesPerFrame * 2;
++
++  ~MicCapture() {
++    if (device_initialized_) {
++      ma_device_uninit(&device_);
++    }
++    if (context_initialized_) {
++      ma_context_uninit(&context_);
++    }
++  }
++
++  bool Available() {
++    std::lock_guard lock(control_mutex_);
++    if (device_initialized_) {
++      return true;
++    }
++    if (std::chrono::steady_clock::now() < retry_after_) {
++      return false;
++    }
++    if (!context_initialized_) {
++      if (ma_context_init(nullptr, 0, nullptr, &context_) != MA_SUCCESS) {
++        XELOGW("XMic: failed to initialize audio capture context");
++        retry_after_ =
++            std::chrono::steady_clock::now() + std::chrono::seconds(3);
++        return false;
++      }
++      context_initialized_ = true;
++    }
++
++    ma_device_config config = ma_device_config_init(ma_device_type_capture);
++    config.capture.format = ma_format_s16;
++    config.capture.channels = 1;
++    config.sampleRate = kSampleRate;
++    config.dataCallback = [](ma_device* device, void*, const void* input,
++                             ma_uint32 frame_count) {
++      if (input) {
++        static_cast<MicCapture*>(device->pUserData)
++            ->Push(static_cast<const int16_t*>(input), frame_count);
++      }
++    };
++    config.pUserData = this;
++
++    ma_device_info* playback = nullptr;
++    ma_device_info* capture = nullptr;
++    ma_uint32 playback_count = 0;
++    ma_uint32 capture_count = 0;
++    ma_device_id selected_id{};
++    std::string selected_name;
++    if (ma_context_get_devices(&context_, &playback, &playback_count, &capture,
++                               &capture_count) == MA_SUCCESS) {
++      const std::string filter =
++          cvars::mic_device_name.empty() ? "usb" : cvars::mic_device_name;
++      auto lowercase = [](std::string value) {
++        std::transform(value.begin(), value.end(), value.begin(),
++                       [](unsigned char c) { return std::tolower(c); });
++        return value;
++      };
++      const std::string wanted = lowercase(filter);
++      for (ma_uint32 i = 0; i < capture_count; ++i) {
++        if (lowercase(capture[i].name).find(wanted) != std::string::npos) {
++          selected_id = capture[i].id;
++          selected_name = capture[i].name;
++          config.capture.pDeviceID = &selected_id;
++          break;
++        }
++      }
++      if (!cvars::mic_device_name.empty() && selected_name.empty()) {
++        XELOGW("XMic: capture device '{}' not found; using system default",
++               cvars::mic_device_name);
++      }
++    }
++    if (ma_device_init(&context_, &config, &device_) != MA_SUCCESS) {
++      XELOGW("XMic: no usable host capture device");
++      retry_after_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
++      return false;
++    }
++    device_initialized_ = true;
++    XELOGI("XMic: selected capture device {}",
++           selected_name.empty() ? "(system default)" : selected_name);
++    return true;
++  }
++
++  bool Start() {
++    if (!Available()) {
++      return false;
++    }
++    std::lock_guard lock(control_mutex_);
++    if (running_) {
++      return true;
++    }
++    {
++      std::lock_guard samples_lock(samples_mutex_);
++      read_ = write_ = 0;
++    }
++    if (ma_device_start(&device_) != MA_SUCCESS) {
++      XELOGW("XMic: failed to start host capture");
++      return false;
++    }
++    running_ = true;
++    XELOGI("XMic: host capture started ({} Hz, mono, 16-bit)", kSampleRate);
++    return true;
++  }
++
++  void Stop() {
++    std::lock_guard lock(control_mutex_);
++    if (running_) {
++      ma_device_stop(&device_);
++      running_ = false;
++      samples_ready_.notify_all();
++    }
++  }
++
++  bool running() const { return running_; }
++
++  bool Read(uint32_t frame_count,
++            std::array<uint8_t, 8 * kBytesPerFrame>& out,
++            uint32_t* peak = nullptr) {
++    const size_t count = frame_count * kSamplesPerFrame;
++    std::unique_lock lock(samples_mutex_);
++    if (!samples_ready_.wait_for(lock, std::chrono::milliseconds(250), [&]() {
++          return write_ - read_ >= count || !running_;
++        })) {
++      return false;
++    }
++    if (!running_ || write_ - read_ < count) {
++      return false;
++    }
++    uint32_t max_amplitude = 0;
++    for (size_t i = 0; i < count; ++i) {
++      const int32_t signed_sample = samples_[read_++ % samples_.size()];
++      max_amplitude = std::max(max_amplitude,
++                               static_cast<uint32_t>(signed_sample < 0
++                                                         ? -signed_sample
++                                                         : signed_sample));
++      const uint16_t sample = static_cast<uint16_t>(signed_sample);
++      out[i * 2] = static_cast<uint8_t>(sample);
++      out[i * 2 + 1] = static_cast<uint8_t>(sample >> 8);
++    }
++    if (peak) {
++      *peak = max_amplitude;
++    }
++    return true;
++  }
++
++ private:
++  void Push(const int16_t* input, ma_uint32 count) {
++    std::lock_guard lock(samples_mutex_);
++    for (ma_uint32 i = 0; i < count; ++i) {
++      samples_[write_++ % samples_.size()] = input[i];
++    }
++    if (write_ - read_ > samples_.size()) {
++      read_ = write_ - samples_.size();
++    }
++    samples_ready_.notify_all();
++  }
++
++  std::mutex control_mutex_;
++  std::mutex samples_mutex_;
++  std::condition_variable samples_ready_;
++  std::array<int16_t, kSampleRate> samples_{};
++  size_t read_ = 0;
++  size_t write_ = 0;
++  ma_context context_{};
++  ma_device device_{};
++  bool context_initialized_ = false;
++  bool device_initialized_ = false;
++  std::atomic<bool> running_{false};
++  std::chrono::steady_clock::time_point retry_after_{};
++};
++
++MicCapture& mic_capture() {
++  static MicCapture capture;
++  return capture;
++}
+
+ void KeEnableFpuExceptions_entry(
+     const ppc_context_t& ctx) {  // dword_t enabled) {
+@@ -131,11 +331,7 @@ dword_result_t MicDeviceRequest_entry(pointer_t<X_MIC_DEVICE> device_ptr) {
+   if (!device_ptr) {
+     return X_STATUS_INVALID_PARAMETER;
+   }
+-  XELOGE("MicDeviceRequest State: {:08X} Action: {:04X} USER: {:08X}",
+-         static_cast<uint32_t>(device_ptr->info.state.get()),
+-         static_cast<uint16_t>(device_ptr->info.request_type.get()),
+-         device_ptr->info.user_index.get());
+-  if (device_ptr->info.user_index > XUserMaxUserCount) {
++  if (device_ptr->info.user_index >= XUserMaxUserCount) {
+     return X_STATUS_INVALID_PARAMETER;
+   }
+
+@@ -143,41 +339,200 @@ dword_result_t MicDeviceRequest_entry(pointer_t<X_MIC_DEVICE> device_ptr) {
+     return X_STATUS_INVALID_DEVICE_REQUEST;
+   }
+
+-  device_ptr->info.state = cvars::allow_mic_initialization
+-                               ? XMicState::MicConnected
+-                               : XMicState::MicNotConnected;
++  auto& capture = mic_capture();
++  const bool connected = cvars::allow_mic_initialization &&
++                         device_ptr->info.user_index == 0 &&
++                         capture.Available();
++  device_ptr->info.state = !connected          ? XMicState::MicNotConnected
++                           : capture.running() ? XMicState::MicRecording
++                                               : XMicState::MicConnected;
++
++  const auto request_type = device_ptr->info.request_type.get();
++  static std::array<std::atomic<uint32_t>, 12> request_counts{};
++  const uint32_t request_index = static_cast<uint32_t>(request_type);
++  const uint32_t request_count = ++request_counts[request_index];
++  if (request_type != XMicRequestType::MicGetStatus && request_count <= 4) {
++    XELOGI("XMic: request={} user={} data0={:08X} data1={:08X} "
++           "unk1={:08X} context={:08X} completion={:08X} connected={}",
++           request_index, device_ptr->info.user_index.get(),
++           device_ptr->capabilities.features.get(),
++           reinterpret_cast<xe::be<uint32_t>*>(
++               &device_ptr->capabilities.format_tag)->get(),
++           device_ptr->info.unk1.get(), device_ptr->info.context_ptr.get(),
++           device_ptr->info.completion_ptr.get(), connected);
++  }
++  if (request_type == XMicRequestType::MicGetStatus) {
++    return X_ERROR_SUCCESS;
++  }
++  if (!connected) {
++    return static_cast<X_STATUS>(0xC000009D);
++  }
++
++  X_STATUS result = X_STATUS_SUCCESS;
++  uint32_t frames = 0;
++  uint32_t buffer_guest = 0;
+
+-  switch (device_ptr->info.request_type) {
+-    case XMicRequestType::MicGetStatus:
+-      return X_ERROR_SUCCESS;
++  switch (request_type) {
+     case XMicRequestType::MicStart:
++      if (!capture.Start()) {
++        result = X_STATUS_UNSUCCESSFUL;
++      } else {
++        device_ptr->info.state = XMicState::MicRecording;
++      }
++      break;
++    case XMicRequestType::MicBeginRecording:
++      // The XMic library passes the native rate here and receives the USB
++      // frame length in the second word.
++      if (device_ptr->capabilities.features != 0x100 &&
++          device_ptr->capabilities.features != MicCapture::kSampleRate) {
++        XELOGW("XMic: unexpected sample-rate selector {:08X}; using USB "
++               "48 kHz format", device_ptr->capabilities.features.get());
++      }
++      if (!capture.Start()) {
++        result = X_STATUS_UNSUCCESSFUL;
++      } else {
++        *reinterpret_cast<xe::be<uint32_t>*>(
++            &device_ptr->capabilities.format_tag) =
++            MicCapture::kBytesPerFrame;
++        device_ptr->info.state = XMicState::MicRecording;
++      }
++      break;
++    case XMicRequestType::MicStop:
++      capture.Stop();
++      device_ptr->info.state = XMicState::MicConnected;
++      break;
+     case XMicRequestType::MicGetData:
++      buffer_guest = device_ptr->capabilities.features;
++      frames = *reinterpret_cast<xe::be<uint32_t>*>(
++          &device_ptr->capabilities.format_tag);
++      if (!capture.running() || !buffer_guest || frames < 1 || frames > 8) {
++        result = X_STATUS_INVALID_PARAMETER;
++      }
++      break;
++    case XMicRequestType::MicSetGain:
++      break;
+     case XMicRequestType::MicGetSampleRates:
++      device_ptr->capabilities.features = 0x100;
+       break;
+     case XMicRequestType::MicGetCapabilities:
+-      device_ptr->capabilities.features = 0x100;
++      device_ptr->capabilities.features = 0;
+       device_ptr->capabilities.format_tag = 1;
+-      device_ptr->capabilities.mic_color = 0;
++      device_ptr->capabilities.channels = 1;
++      device_ptr->capabilities.sample_rates = 0x100;
++      device_ptr->capabilities.bits_per_sample = 16;
++      device_ptr->capabilities.reserved_0e = 0;
++      device_ptr->capabilities.frame_length = 1000;
++      device_ptr->capabilities.mic_color = 0xFF;
++      device_ptr->capabilities.reserved_15 = 0;
++      device_ptr->capabilities.vendor_id = 0;
++      device_ptr->capabilities.product_id = 0;
++      device_ptr->capabilities.revision = 0;
+       break;
+     default:
+-      break;
++      return X_STATUS_INVALID_DEVICE_REQUEST;
+   }
+
+-  // This should be handled by DPC.
+-  if (device_ptr->info.completion_ptr) {
+-    // Not sure what args should be put there, but seems like negative r4 causes
+-    // instant bailout. For now leave it hardcoded to failure.
+-    uint64_t args[] = {device_ptr.guest_address(),
+-                       static_cast<uint64_t>(X_STATUS_UNSUCCESSFUL)};
+-
+-    kernel_state()->processor()->Execute(
+-        XThread::GetCurrentThread()->thread_state(),
+-        device_ptr->info.completion_ptr, args, xe::countof(args));
++  const uint32_t callback = device_ptr->info.completion_ptr;
++  if (!callback) {
++    if (result == X_STATUS_SUCCESS && frames) {
++      std::array<uint8_t, 8 * MicCapture::kBytesPerFrame> audio{};
++      uint32_t peak = 0;
++      if (capture.Read(frames, audio, &peak)) {
++        std::memcpy(kernel_state()->memory()->TranslateVirtual(buffer_guest),
++                    audio.data(), frames * MicCapture::kBytesPerFrame);
++        if (request_count <= 4 || (request_count & 1023) == 0) {
++          XELOGI("XMic: synchronous data frames={} peak={}", frames, peak);
++        }
++      } else {
++        result = X_STATUS_UNSUCCESSFUL;
++        XELOGW("XMic: synchronous capture timed out");
++      }
++    }
++    return result;
++  }
++  const uint32_t request_guest = device_ptr.guest_address();
++  const uint32_t context_guest = device_ptr->info.context_ptr;
++  KernelState* const state = kernel_state();
++  std::array<uint8_t, 8 * MicCapture::kBytesPerFrame> audio{};
++  if (result == X_STATUS_SUCCESS && frames) {
++    uint32_t peak = 0;
++    if (capture.Read(frames, audio, &peak)) {
++      std::memcpy(state->memory()->TranslateVirtual(buffer_guest), audio.data(),
++                  frames * MicCapture::kBytesPerFrame);
++      if (request_count <= 4 || (request_count & 1023) == 0) {
++        XELOGI("XMic: data frames={} peak={}", frames, peak);
++      }
++    } else {
++      result = X_STATUS_UNSUCCESSFUL;
++      if (request_count <= 4 || (request_count & 1023) == 0) {
++        XELOGW("XMic: capture timed out");
++      }
++    }
+   }
+
++  uint32_t statuses_guest = 0;
++  uint32_t lengths_guest = 0;
++  if (frames) {
++    statuses_guest = state->memory()->SystemHeapAlloc(frames * 4);
++    lengths_guest = state->memory()->SystemHeapAlloc(frames * 2);
++    if (!statuses_guest || !lengths_guest) {
++      result = X_STATUS_NO_MEMORY;
++    } else {
++      auto statuses =
++          state->memory()->TranslateVirtual<xe::be<uint32_t>*>(statuses_guest);
++      auto lengths =
++          state->memory()->TranslateVirtual<xe::be<uint16_t>*>(lengths_guest);
++      for (uint32_t i = 0; i < frames; ++i) {
++        statuses[i] = result;
++        lengths[i] =
++            result == X_STATUS_SUCCESS ? MicCapture::kBytesPerFrame : 0;
++      }
++    }
++  }
++  uint64_t args[] = {request_guest, static_cast<uint32_t>(result),
++                     statuses_guest, lengths_guest};
++  // The XMic library's completion routine resumes its request on this guest
++  // thread; its saved registers and stack must still belong to that request.
++  const uint64_t completion_result = state->processor()->Execute(
++      XThread::GetCurrentThread()->thread_state(), callback, args,
++      xe::countof(args));
++  if (request_count <= 4 || (frames && (request_count & 1023) == 0)) {
++    XELOGI("XMic: completion request={} result={:08X} callback_return={:08X}",
++           request_index, static_cast<uint32_t>(result),
++           static_cast<uint32_t>(completion_result));
++  }
++  // The XMic library keeps the caller's frame-length array in its request
++  // context. Check the first few completed transfers without reading audio.
++  if (frames && request_count <= 4 && context_guest + 0x30 == request_guest) {
++    const uint32_t field_guest = context_guest + 0x20;
++    auto* field_heap = state->memory()->LookupHeap(field_guest);
++    if (field_heap &&
++        field_heap->QueryRangeAccess(field_guest, field_guest + 3) !=
++            xe::memory::PageAccess::kNoAccess) {
++      const uint32_t caller_lengths_guest =
++          state->memory()->TranslateVirtual<xe::be<uint32_t>*>(field_guest)->get();
++      auto* lengths_heap = state->memory()->LookupHeap(caller_lengths_guest);
++      if (lengths_heap && caller_lengths_guest <= UINT32_MAX - frames * 2 &&
++          lengths_heap->QueryRangeAccess(caller_lengths_guest,
++                                         caller_lengths_guest + frames * 2 - 1) !=
++              xe::memory::PageAccess::kNoAccess) {
++        auto* caller_lengths = state->memory()->TranslateVirtual<
++            xe::be<uint16_t>*>(caller_lengths_guest);
++        XELOGI("XMic: caller frame lengths first={} second={}",
++               caller_lengths[0].get(),
++               frames > 1 ? caller_lengths[1].get() : 0);
++      }
++    }
++  }
++  if (statuses_guest) {
++    state->memory()->SystemHeapFree(statuses_guest);
++  }
++  if (lengths_guest) {
++    state->memory()->SystemHeapFree(lengths_guest);
++  }
+   return X_STATUS_PENDING;
+ }
+-DECLARE_XBOXKRNL_EXPORT1(MicDeviceRequest, kNone, kStub);
++DECLARE_XBOXKRNL_EXPORT1(MicDeviceRequest, kNone, kImplemented);
+
+ // The kernel's LZX decompression as cabinets use it. A context keeps the
+ // stream and each call passes one compressed frame.

@@ -1,0 +1,20 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -3322,6 +3322,16 @@
+   // Pop debug marker for draw call.
+   PopDebugMarker();
+-
++
++  // A host-routed draw reads CPU-backed guest memory directly. The guest
++  // must not reuse these inputs after an execution fence until this draw
++  // has finished, even when it doesn't itself produce awaited memexports.
++  // Defer the wait to the existing guest fence/interrupt path rather than
++  // synchronizing every draw. Device-local input snapshots don't need it.
++  if (route_to_host && submission_open_) {
++    memexport_awaited_submission_ = GetCurrentSubmission();
++    memexport_await_pending_ = true;
++  }
++
+   if (memexport_used) {
+     InsertDebugMarker("Memexport draw: %zu ranges", memexport_ranges_.size());
+     // Make sure this memexporting draw is ordered with other work using shared

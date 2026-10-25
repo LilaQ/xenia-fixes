@@ -1,0 +1,35 @@
+--- a/src/xenia/gpu/trace_player.cc
++++ b/src/xenia/gpu/trace_player.cc
+@@ -196,2 +196,17 @@
+-          command_processor->ExecutePacket(pending_packet->base_ptr,
+-                                           pending_packet->count);
++          // A one-word trace marker can originate from a skipped padding word.
++          // At a wrapped ring boundary older recorders copied the preceding
++          // page's final dword instead. Such a marker has no payload or effect;
++          // never interpret those unrelated bytes as a register-write packet.
++          const uint32_t header = xe::load_and_swap<uint32_t>(
++              reinterpret_cast<const uint8_t*>(pending_packet) +
++              sizeof(PacketStartCommand));
++          const uint32_t type = header >> 30;
++          const bool invalid_padding_marker = pending_packet->count == 1 &&
++              ((type == 0 && header != 0) || type == 1 || type == 3);
++          if (invalid_padding_marker) {
++            XELOGW("Replay: skipped malformed one-word padding marker at {:08X}",
++                   pending_packet->base_ptr);
++          } else {
++            command_processor->ExecutePacket(pending_packet->base_ptr,
++                                             pending_packet->count);
++          }
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -49,0 +50,4 @@
++
++DEFINE_uint32(d3d12_draw_timing_interval, 240,
++              "Frames between GPU timing samples; 1 for short trace replays.",
++              "D3D12");
+@@ -4485 +4489 @@
+-      frame_current_ % 240 || draw_timing_pending_submission_) {
++      frame_current_ % std::max(1u, cvars::d3d12_draw_timing_interval) || draw_timing_pending_submission_) {
+@@ -4545 +4549 @@
+-         !(frame_current_ % 240) && !draw_timing_pending_submission_;
++         !(frame_current_ % std::max(1u, cvars::d3d12_draw_timing_interval)) && !draw_timing_pending_submission_;

@@ -1,0 +1,27 @@
+title_name = "Shift 2: Unleashed"
+title_id = "45410934"
+hash = "C4CD9F33611C5AFD"
+# default.xex, media 739C7DC0. Hash verified against the installed image and log.
+
+[[patch]]
+name = "60 FPS presentation interval"
+desc = "Use one vblank at renderer initialization and in the per-frame VSync update. Preserve physics and elapsed-time clocks. Use a 60 FPS host limit and normal time_scalar=1. Gameplay performance and normal speed require verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+# CreateDevice receives renderer+0x5E8; PresentationInterval is at +0x34.
+# Only r8's interval value is changed; its next use replaces the register.
+[[patch.be32]]
+address = 0x829ED5EC
+value = 0x39000001 # original: li r8,2 / 0x39000002
+
+# Expected interval in the renderer's per-frame VSync check.
+[[patch.be32]]
+address = 0x829E2364
+value = 0x39600001 # original: li r11,2 / 0x39600002
+
+# SetRenderState_PresentInterval (821C59E0) writes device+0x3630.
+# Leave the separate VSync-disabled/immediate branch intact.
+[[patch.be32]]
+address = 0x829E2380
+value = 0x38800001 # original: li r4,2 / 0x38800002

@@ -1,0 +1,175 @@
+--- a/src/xenia/gpu/texture_cache.h
++++ b/src/xenia/gpu/texture_cache.h
+@@ -319,6 +319,7 @@
+     bool EnableMipLevelTracking();
+     void EnableBaseRangeTracking();
+     std::pair<uint32_t, uint32_t> GetDirtyBaseBytes();
++    std::vector<std::pair<uint32_t, uint32_t>> GetDirtyBaseBands(uint32_t band_bytes);
+     void BaseRangeWatchCallback(const global_unique_lock_type&, uint32_t chunk);
+     uint32_t GetOutdatedMipLevels();
+     uint32_t GetOutdatedMipSlices(uint32_t level);
+--- a/src/xenia/gpu/texture_cache.cc
++++ b/src/xenia/gpu/texture_cache.cc
+@@ -802,6 +802,27 @@
+   return {dirty_base_first_, dirty_base_end_};
+ }
+ 
++std::vector<std::pair<uint32_t, uint32_t>>
++TextureCache::Texture::GetDirtyBaseBands(uint32_t band_bytes) {
++  auto lock = texture_cache_.global_critical_region_.Acquire();
++  if (!base_range_tracking_ || dirty_base_first_ == UINT32_MAX || !band_bytes)
++    return {{0, GetGuestBaseSize()}};
++  std::vector<std::pair<uint32_t, uint32_t>> ranges;
++  for (uint32_t i = 0; i < base_range_watch_handles_.size(); ++i) {
++    if (base_range_watch_handles_[i]) continue;
++    uint32_t first = i * 65536u / band_bytes * band_bytes;
++    uint32_t end = std::min(GetGuestBaseSize(),
++        ((i + 1) * 65536u + band_bytes - 1) / band_bytes * band_bytes);
++    if (!ranges.empty() && first <= ranges.back().second) {
++      ranges.back().second = std::max(ranges.back().second, end);
++    } else {
++      ranges.emplace_back(first, end);
++    }
++  }
++  if (ranges.empty()) return {{0, GetGuestBaseSize()}};
++  return ranges;
++}
++
+ void TextureCache::Texture::BaseRangeWatchCallback(
+     const global_unique_lock_type& lock, uint32_t chunk) {
+   assert_true(lock.owns_lock());
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.h
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.h
+@@ -551,6 +551,9 @@
+   // This binds pipelines, allocates descriptors, and copies!
+   bool LoadTextureDataFromResidentMemoryImpl(Texture& texture, bool load_base,
+                                              bool load_mips) override;
++
++  bool LoadTextureRange(Texture& texture, bool load_base, bool load_mips,
++                        uint32_t first_row, uint32_t row_count);
+ 
+   void UpdateTextureBindingsImpl(uint32_t fetch_constant_mask) override;
+ 
+--- a/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
++++ b/src/xenia/gpu/d3d12/d3d12_texture_cache.cc
+@@ -1599,9 +1599,61 @@
+       new D3D12Texture(*this, key, resource.Get(), resource_state));
+ }
+ 
+-bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+-                                                              bool load_base,
+-                                                              bool load_mips) {
++bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(
++    Texture& texture, bool load_base, bool load_mips) {
++  auto& d3d12_texture = static_cast<D3D12Texture&>(texture);
++  const auto texture_key = d3d12_texture.key();
++  const auto& guest_layout = d3d12_texture.guest_layout();
++  const uint32_t width = texture_key.GetWidth();
++  const uint32_t height = texture_key.GetHeight();
++  if (cvars::d3d12_partial_atlas_upload && load_base && !load_mips &&
++      !texture_key.scaled_resolve &&
++      !texture_key.mip_max_level && !texture_key.packed_mips &&
++      texture_key.dimension == xenos::DataDimension::k2DOrStacked &&
++      texture_key.GetDepthOrArraySize() == 1 &&
++      width == 2048 && height >= 2048 && height <= 4096 &&
++      guest_layout.base.row_pitch_bytes != 0 &&
++      ((!texture_key.tiled &&
++        (texture_key.format == xenos::TextureFormat::k_8 ||
++         texture_key.format == xenos::TextureFormat::k_16)) ||
++       (texture_key.tiled && texture_key.format == xenos::TextureFormat::k_DXT4_5))) {
++    d3d12_texture.EnableBaseRangeTracking();
++    const uint32_t row_pitch = guest_layout.base.row_pitch_bytes;
++    const uint32_t block_height = texture_key.tiled ? 4u : 1u;
++    const uint32_t band_bytes = row_pitch * (texture_key.tiled ? 32u : 1u);
++    auto ranges = d3d12_texture.GetDirtyBaseBands(band_bytes);
++    // Bound additional dispatches; retain the original conservative union for
++    // highly fragmented writes. Adjacent aligned bands are already merged.
++    if (ranges.size() > 8) ranges = {{ranges.front().first, ranges.back().second}};
++    uint32_t rows = 0;
++    for (const auto& range : ranges) {
++      const uint32_t first = range.first / row_pitch * block_height;
++      const uint32_t end = std::min(height,
++          (range.second + row_pitch - 1) / row_pitch * block_height);
++      if (first >= end) continue;
++      if (!LoadTextureRange(texture, load_base, load_mips, first, end - first))
++        return false;
++      rows += end - first;
++    }
++    static thread_local uint64_t totals[3][3] = {};
++    const uint32_t kind = texture_key.tiled ? 2 :
++        texture_key.format == xenos::TextureFormat::k_8 ? 0 : 1;
++    auto& total = totals[kind];
++    total[0] += rows; total[1] += height;
++    if (++total[2] == 120) {
++      XELOGI("Sparse atlas volume: format {}, {} of {} rows ({:.1f}%)",
++             uint32_t(texture_key.format), total[0], total[1],
++             100.0 * double(total[0]) / double(total[1]));
++      total[0] = total[1] = total[2] = 0;
++    }
++    return true;
++  }
++  return LoadTextureRange(texture, load_base, load_mips, 0, UINT32_MAX);
++}
++
++bool D3D12TextureCache::LoadTextureRange(Texture& texture, bool load_base,
++                                        bool load_mips, uint32_t base_first_row,
++                                        uint32_t row_count) {
+   SCOPE_profile_cpu_f("gpu");
+   D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
+   TextureKey texture_key = d3d12_texture.key();
+@@ -1684,50 +1736,11 @@
+   bool is_3d_tiling = is_3d || d3d12_texture.force_load_3d_tiling();
+   uint32_t width = texture_key.GetWidth();
+   uint32_t height = texture_key.GetHeight();
+-  uint32_t base_first_row = 0;
+-  if (cvars::d3d12_partial_atlas_upload && load_base && !load_mips &&
+-      !texture_key.scaled_resolve &&
+-      !texture_key.mip_max_level && !texture_key.packed_mips &&
+-      texture_key.dimension == xenos::DataDimension::k2DOrStacked &&
+-      texture_key.GetDepthOrArraySize() == 1 &&
+-      width == 2048 && height >= 2048 && height <= 4096 &&
+-      guest_layout.base.row_pitch_bytes != 0 &&
+-      ((!texture_key.tiled &&
+-        (texture_key.format == xenos::TextureFormat::k_8 ||
+-         texture_key.format == xenos::TextureFormat::k_16)) ||
+-       (texture_key.tiled && texture_key.format == xenos::TextureFormat::k_DXT4_5))) {
+-    d3d12_texture.EnableBaseRangeTracking();
+-    const auto dirty = d3d12_texture.GetDirtyBaseBytes();
+-    const uint32_t row_pitch = guest_layout.base.row_pitch_bytes;
+-    const uint32_t block_height = texture_key.tiled ? 4u : 1u;
+-    const uint32_t band_blocks = texture_key.tiled ? 32u : 1u;
+-    const uint32_t band_bytes = row_pitch * band_blocks;
+-    const uint32_t first_row = dirty.first / band_bytes * band_blocks * block_height;
+-    const uint32_t end_row = std::min(height,
+-        (dirty.second + band_bytes - 1) / band_bytes * band_blocks * block_height);
+-    if (first_row < end_row) {
+-      base_first_row = first_row;
+-      height = end_row - first_row;
+-    }
+-    static thread_local uint64_t atlas_rows[3] = {};
+-    static thread_local uint64_t atlas_full_rows[3] = {};
+-    static thread_local uint32_t atlas_uploads[3] = {};
+-    uint32_t atlas_kind = texture_key.tiled ? 2 :
+-        texture_key.format == xenos::TextureFormat::k_8 ? 0 : 1;
+-    atlas_rows[atlas_kind] += height;
+-    atlas_full_rows[atlas_kind] += texture_key.GetHeight();
+-    if (++atlas_uploads[atlas_kind] == 120) {
+-      XELOGI("Atlas upload volume: format {}, 120 uploads, {} of {} rows ({:.1f}%)",
+-             uint32_t(texture_key.format), atlas_rows[atlas_kind],
+-             atlas_full_rows[atlas_kind],
+-             100.0 * double(atlas_rows[atlas_kind]) / double(atlas_full_rows[atlas_kind]));
+-      atlas_rows[atlas_kind] = atlas_full_rows[atlas_kind] = atlas_uploads[atlas_kind] = 0;
+-    }
+-    if (cvars::log_texture_loads) {
+-      XELOGI("Partial atlas upload {:08X}: rows {}..{} of {}",
+-             texture_key.base_page << 12, base_first_row,
+-             base_first_row + height, texture_key.GetHeight());
+-    }
++  if (row_count != UINT32_MAX) height = row_count;
++  if (cvars::log_texture_loads && row_count != UINT32_MAX) {
++    XELOGI("Sparse atlas upload {:08X}: rows {}..{} of {}",
++           texture_key.base_page << 12, base_first_row,
++           base_first_row + height, texture_key.GetHeight());
+   }
+ 
+   uint32_t depth_or_array_size = texture_key.GetDepthOrArraySize();

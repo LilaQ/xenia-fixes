@@ -1,0 +1,336 @@
+title_name = "Serious Sam - Double D XXL"
+title_id = "58411249"
+hash = "0F8C087D6FEA1BD4"
+
+[[patch]]
+name = "RuntimeHost copy and JIT cache repair"
+desc = "Xenia-only scalar memcpy and KeSweepIcacheRange replacement. Requires writable_code_segments = true. Experimental, not a verified performance fix or 60 FPS guarantee."
+author = "LilaQ"
+is_enabled = true
+[[patch.be32]]
+address = 0x823570D0
+value = 0x7C661B78
+[[patch.be32]]
+address = 0x823570D4
+value = 0x28050080
+[[patch.be32]]
+address = 0x823570D8
+value = 0x41800098
+[[patch.be32]]
+address = 0x823570DC
+value = 0xE8E40000
+[[patch.be32]]
+address = 0x823570E0
+value = 0xF8E60000
+[[patch.be32]]
+address = 0x823570E4
+value = 0xE8E40008
+[[patch.be32]]
+address = 0x823570E8
+value = 0xF8E60008
+[[patch.be32]]
+address = 0x823570EC
+value = 0xE8E40010
+[[patch.be32]]
+address = 0x823570F0
+value = 0xF8E60010
+[[patch.be32]]
+address = 0x823570F4
+value = 0xE8E40018
+[[patch.be32]]
+address = 0x823570F8
+value = 0xF8E60018
+[[patch.be32]]
+address = 0x823570FC
+value = 0xE8E40020
+[[patch.be32]]
+address = 0x82357100
+value = 0xF8E60020
+[[patch.be32]]
+address = 0x82357104
+value = 0xE8E40028
+[[patch.be32]]
+address = 0x82357108
+value = 0xF8E60028
+[[patch.be32]]
+address = 0x8235710C
+value = 0xE8E40030
+[[patch.be32]]
+address = 0x82357110
+value = 0xF8E60030
+[[patch.be32]]
+address = 0x82357114
+value = 0xE8E40038
+[[patch.be32]]
+address = 0x82357118
+value = 0xF8E60038
+[[patch.be32]]
+address = 0x8235711C
+value = 0xE8E40040
+[[patch.be32]]
+address = 0x82357120
+value = 0xF8E60040
+[[patch.be32]]
+address = 0x82357124
+value = 0xE8E40048
+[[patch.be32]]
+address = 0x82357128
+value = 0xF8E60048
+[[patch.be32]]
+address = 0x8235712C
+value = 0xE8E40050
+[[patch.be32]]
+address = 0x82357130
+value = 0xF8E60050
+[[patch.be32]]
+address = 0x82357134
+value = 0xE8E40058
+[[patch.be32]]
+address = 0x82357138
+value = 0xF8E60058
+[[patch.be32]]
+address = 0x8235713C
+value = 0xE8E40060
+[[patch.be32]]
+address = 0x82357140
+value = 0xF8E60060
+[[patch.be32]]
+address = 0x82357144
+value = 0xE8E40068
+[[patch.be32]]
+address = 0x82357148
+value = 0xF8E60068
+[[patch.be32]]
+address = 0x8235714C
+value = 0xE8E40070
+[[patch.be32]]
+address = 0x82357150
+value = 0xF8E60070
+[[patch.be32]]
+address = 0x82357154
+value = 0xE8E40078
+[[patch.be32]]
+address = 0x82357158
+value = 0xF8E60078
+[[patch.be32]]
+address = 0x8235715C
+value = 0x38840080
+[[patch.be32]]
+address = 0x82357160
+value = 0x38C60080
+[[patch.be32]]
+address = 0x82357164
+value = 0x38A5FF80
+[[patch.be32]]
+address = 0x82357168
+value = 0x28050080
+[[patch.be32]]
+address = 0x8235716C
+value = 0x4080FF70
+[[patch.be32]]
+address = 0x82357170
+value = 0x28050008
+[[patch.be32]]
+address = 0x82357174
+value = 0x41800020
+[[patch.be32]]
+address = 0x82357178
+value = 0xE8E40000
+[[patch.be32]]
+address = 0x8235717C
+value = 0xF8E60000
+[[patch.be32]]
+address = 0x82357180
+value = 0x38840008
+[[patch.be32]]
+address = 0x82357184
+value = 0x38C60008
+[[patch.be32]]
+address = 0x82357188
+value = 0x38A5FFF8
+[[patch.be32]]
+address = 0x8235718C
+value = 0x28050008
+[[patch.be32]]
+address = 0x82357190
+value = 0x4080FFE8
+[[patch.be32]]
+address = 0x82357194
+value = 0x28050000
+[[patch.be32]]
+address = 0x82357198
+value = 0x4D820020
+[[patch.be32]]
+address = 0x8235719C
+value = 0x7CA903A6
+[[patch.be32]]
+address = 0x823571A0
+value = 0x88E40000
+[[patch.be32]]
+address = 0x823571A4
+value = 0x98E60000
+[[patch.be32]]
+address = 0x823571A8
+value = 0x38840001
+[[patch.be32]]
+address = 0x823571AC
+value = 0x38C60001
+[[patch.be32]]
+address = 0x823571B0
+value = 0x4200FFF0
+[[patch.be32]]
+address = 0x823571B4
+value = 0x4E800020
+[[patch.be32]]
+address = 0x82395080
+value = 0x4BFC2140
+[[patch.be32]]
+address = 0x823571C0
+value = 0x28040000
+[[patch.be32]]
+address = 0x823571C4
+value = 0x4D820020
+[[patch.be32]]
+address = 0x823571C8
+value = 0x7C0802A6
+[[patch.be32]]
+address = 0x823571CC
+value = 0xF801FFF8
+[[patch.be32]]
+address = 0x823571D0
+value = 0x9421FF80
+[[patch.be32]]
+address = 0x823571D4
+value = 0xF8610050
+[[patch.be32]]
+address = 0x823571D8
+value = 0xF8810058
+[[patch.be32]]
+address = 0x823571DC
+value = 0x3D608235
+[[patch.be32]]
+address = 0x823571E0
+value = 0x616B72D0
+[[patch.be32]]
+address = 0x823571E4
+value = 0x556B003E
+[[patch.be32]]
+address = 0x823571E8
+value = 0x818B0000
+[[patch.be32]]
+address = 0x823571EC
+value = 0x280C0000
+[[patch.be32]]
+address = 0x823571F0
+value = 0x4082005C
+[[patch.be32]]
+address = 0x823571F4
+value = 0x3C608235
+[[patch.be32]]
+address = 0x823571F8
+value = 0x606372E0
+[[patch.be32]]
+address = 0x823571FC
+value = 0x5463003E
+[[patch.be32]]
+address = 0x82357200
+value = 0x38810060
+[[patch.be32]]
+address = 0x82357204
+value = 0x4867AC59
+[[patch.be32]]
+address = 0x82357208
+value = 0x28030000
+[[patch.be32]]
+address = 0x8235720C
+value = 0x40820050
+[[patch.be32]]
+address = 0x82357210
+value = 0x80610060
+[[patch.be32]]
+address = 0x82357214
+value = 0x388000AB
+[[patch.be32]]
+address = 0x82357218
+value = 0x38A10064
+[[patch.be32]]
+address = 0x8235721C
+value = 0x38000000
+[[patch.be32]]
+address = 0x82357220
+value = 0x90010064
+[[patch.be32]]
+address = 0x82357224
+value = 0x4867AB49
+[[patch.be32]]
+address = 0x82357228
+value = 0x28030000
+[[patch.be32]]
+address = 0x8235722C
+value = 0x40820030
+[[patch.be32]]
+address = 0x82357230
+value = 0x81810064
+[[patch.be32]]
+address = 0x82357234
+value = 0x280C0000
+[[patch.be32]]
+address = 0x82357238
+value = 0x41820024
+[[patch.be32]]
+address = 0x8235723C
+value = 0x3D608235
+[[patch.be32]]
+address = 0x82357240
+value = 0x616B72D0
+[[patch.be32]]
+address = 0x82357244
+value = 0x556B003E
+[[patch.be32]]
+address = 0x82357248
+value = 0x918B0000
+[[patch.be32]]
+address = 0x8235724C
+value = 0xE8610050
+[[patch.be32]]
+address = 0x82357250
+value = 0xE8810058
+[[patch.be32]]
+address = 0x82357254
+value = 0x7D8903A6
+[[patch.be32]]
+address = 0x82357258
+value = 0x4E800421
+[[patch.be32]]
+address = 0x8235725C
+value = 0x7C0004AC
+[[patch.be32]]
+address = 0x82357260
+value = 0x4C00012C
+[[patch.be32]]
+address = 0x82357264
+value = 0xE8010078
+[[patch.be32]]
+address = 0x82357268
+value = 0x38210080
+[[patch.be32]]
+address = 0x8235726C
+value = 0x7C0803A6
+[[patch.be32]]
+address = 0x82357270
+value = 0x4E800020
+[[patch.be32]]
+address = 0x823572D0
+value = 0x00000000
+[[patch.be32]]
+address = 0x823572E0
+value = 0x78626F78
+[[patch.be32]]
+address = 0x823572E4
+value = 0x6B726E6C
+[[patch.be32]]
+address = 0x823572E8
+value = 0x2E657865
+[[patch.be32]]
+address = 0x823572EC
+value = 0x00000000

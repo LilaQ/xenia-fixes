@@ -1,0 +1,50 @@
+--- a/src/xenia/gpu/d3d12/d3d12_command_processor.cc
++++ b/src/xenia/gpu/d3d12/d3d12_command_processor.cc
+@@ -3892,7 +3892,10 @@
+       render_target_cache_->InitializeTraceSubmitDownloads();
+   bool shared_memory_submitted =
+       shared_memory_->InitializeTraceSubmitDownloads();
+-  if (!render_target_cache_submitted && !shared_memory_submitted) {
++  const bool snapshot_host_exports =
++      shared_memory_->GetHostBuffer() && any_memexport_pages_written_;
++  if (!render_target_cache_submitted && !shared_memory_submitted &&
++      !snapshot_host_exports) {
+     return;
+   }
+   AwaitAllQueueOperationsCompletion();
+@@ -3901,6 +3904,21 @@
+   }
+   if (shared_memory_submitted) {
+     shared_memory_->InitializeTraceCompleteDownloads();
++  }
++  // Host-routed exports aren't in the device-local shared-memory snapshot.
++  // Record their completed physical RAM pages too, including exports made
++  // before the trace started, so replay can reconstruct existing geometry.
++  // The dedicated alias avoids guest access callbacks while serializing it.
++  if (snapshot_host_exports &&
++      GatherMemexportCopyRuns(0, SharedMemory::kBufferSize, false)) {
++    const uint8_t* host = shared_memory_->GetHostBufferMapping();
++    uint64_t bytes = 0;
++    for (const auto& run : memexport_copy_runs_) {
++      trace_writer_.WriteMemoryRead(run.first, run.second, host + run.first);
++      bytes += run.second;
++    }
++    XELOGI("Trace host memexport snapshot: {} bytes across {} ranges", bytes,
++           memexport_copy_runs_.size());
+   }
+ }
+ 
+--- a/src/xenia/gpu/d3d12/d3d12_shared_memory.h
++++ b/src/xenia/gpu/d3d12/d3d12_shared_memory.h
+@@ -48,6 +48,11 @@
+   // readback, so their output is coherent with the CPU (no clobber, since it
+   // aliases guest RAM). Mirrors the Vulkan host_buffer().
+   ID3D12Resource* GetHostBuffer() const { return host_buffer_; }
++  // Dedicated mapping of the same physical RAM, unaffected by guest page
++  // protections. Only read after the producing GPU submission has completed.
++  const uint8_t* GetHostBufferMapping() const {
++    return static_cast<const uint8_t*>(host_buffer_view_);
++  }
+   D3D12_GPU_VIRTUAL_ADDRESS GetHostGPUAddress() const {
+     return host_buffer_gpu_address_;
+   }

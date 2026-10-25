@@ -1,0 +1,18 @@
+title_name = "Star Wars: The Force Unleashed"
+title_id = "4C4107D2"
+hash = "4C99AB5DF93A70F3"
+# Default.xex, media 6CD9E482, base version 0.0.0.1, no title update.
+
+[[patch]]
+name = "60 FPS frame lock"
+desc = "Initialize the engine's Framerate Lock to 60 instead of taking its configured 30-FPS value. The normal clock calculates elapsed time and skips updates until 1 / FramerateLock has elapsed. Keep time_scalar=1 and full readback. Use vsync=false, framerate_limit=0 to let the native frame lock pace gameplay. Sustained performance and normal gameplay speed require verification."
+author = "Local cabinet patch"
+is_enabled = true
+
+[[patch.be32]]
+address = 0x821FF2EC
+value = 0x3960003C # li r11,60 (original: lwz r11,0x68(r31) / 0x817F0068)
+# The original conversion sequence stores this integer as a float at engine
+# object+0x144. The Framerate Lock menu points to that same field; the main
+# loop loads it as f1 at 82207294 and passes it to the timing gate 821FC9D0.
+# Shared 30-FPS constants, cutscene overrides, physics and time scale are intact.

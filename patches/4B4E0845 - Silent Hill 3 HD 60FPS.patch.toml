@@ -1,0 +1,13 @@
+title_name = "Silent Hill 3 HD"
+title_id = "4B4E0845"
+hash = "4DC9FF869FF55A1F"
+# Media 625FCB0C, base version 00000005.
+
+[[patch]]
+    name = "60 FPS presentation interval"
+    desc = "Changes D3D presentation from two refresh intervals to one. Keep display at 60 Hz and time_scalar at 1. Gameplay and cutscene timing need an interactive check."
+    author = "Local cabinet patch"
+    is_enabled = true
+    [[patch.be32]]
+        address = 0x822F9D48 # li r11,2; D3DPRESENT_PARAMETERS + 0x34
+        value = 0x39600001 # li r11,1; original 0x39600002

@@ -1,0 +1,26 @@
+# Banjo-Kazooie: Nuts & Bolts, 4D5307ED, existing standard Edge executable.
+# Keep the original profile and shared Canary content root when merging.
+# Preserve the existing enabled 60 FPS and AF patches for retail/TU3 hashes;
+# the patch loader must match C03916823ADAC91B or 13D07541617C6257.
+[GPU]
+gpu = "d3d12"
+render_target_path = "performance"
+readback_resolve = false
+framerate_limit = 60
+guest_display_refresh_cap = true
+occlusion_query = "fast"
+draw_resolution_scale_x = 1
+draw_resolution_scale_y = 1
+
+[Display]
+fullscreen = true
+
+[HID]
+hid = "sdl"
+
+[General]
+apply_patches = true
+time_scalar = 1
+
+[UI]
+show_achievement_notification = true

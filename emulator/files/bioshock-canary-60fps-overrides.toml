@@ -1,0 +1,8 @@
+# Original BioShock / Ultimate Rapture Edition.
+# Pair with 545407D8 - BioShock Ultimate Rapture 60 FPS.patch.toml.
+# The hash-matched patch forces the native VSYNC 0 command despite saved options.
+[GPU]
+framerate_limit = 60
+
+[General]
+apply_patches = true

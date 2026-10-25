@@ -1,0 +1,18 @@
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc
+@@ -1495,10 +1495,12 @@
+   ctx->r[1] = old_stack_pointer - 32;
+ 
+   while (!apc_queue.empty(ctx)) {
+-    uint32_t apc_ptr = apc_queue.flink_ptr;
++    // The queue stores list-entry addresses, but guest callbacks use XAPC*.
++    uint32_t apc_list_entry_ptr = apc_queue.flink_ptr;
+ 
+     XAPC* apc = apc_queue.ListEntryObject(
+-        ctx->TranslateVirtual<X_LIST_ENTRY*>(apc_ptr));
++        ctx->TranslateVirtual<X_LIST_ENTRY*>(apc_list_entry_ptr));
++    uint32_t apc_ptr = ctx->HostToGuestVirtual(apc);
+ 
+     uint8_t* scratch_ptr = ctx->TranslateVirtual(scratch_address);
+     xe::store_and_swap<uint32_t>(scratch_ptr + 0, apc->normal_routine);
